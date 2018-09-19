@@ -10,14 +10,16 @@ from urllib.parse import urlparse
 
 import markdown
 
-
 STATIC_CACHE = {}
+
+
 def load_from_cache(path):
     global STATIC_CACHE
     if path not in STATIC_CACHE:
         with open(join(dirname(__file__), 'static') + path, 'r') as static_file:
             STATIC_CACHE[path] = static_file.read()
     return STATIC_CACHE[path]
+
 
 def compile_html(mdfile=None, extensions=None, raw=None, **kwargs):
     html = None
@@ -33,6 +35,7 @@ def compile_html(mdfile=None, extensions=None, raw=None, **kwargs):
         doc = load_from_cache('/template.html').format(content=html, script='', css=css)
     return doc
 
+
 class MarkdownHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, mdfile, extensions=(), handler=BaseHTTPRequestHandler, interface="127.0.0.1", port=8080):
@@ -41,6 +44,7 @@ class MarkdownHTTPServer(ThreadingHTTPServer):
         import signal
 
         self.stop = False
+
         def sigint_handler(signum, frame):
             self.stop = True
 
@@ -52,6 +56,7 @@ class MarkdownHTTPServer(ThreadingHTTPServer):
         self.condition_variable = threading.Condition()
         self.hash = None
         self.etag = None
+
         def watch_file():
             watcher = inotify.adapters.Inotify()
             watcher.add_watch(dirname(abspath(self.mdfile)))
@@ -88,8 +93,6 @@ class MarkdownHTTPServer(ThreadingHTTPServer):
 
 
 class MarkdownRequestHandler(BaseHTTPRequestHandler):
-
-
     status_map = {
         200: "OK",
         204: "No Content",
@@ -132,11 +135,12 @@ class MarkdownRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path)
         if path.path == '/':
-            self.answer(200, reply=load_from_cache('/template.html').format(content='',
-                            script='<script src="/hot-reload.js", type="text/javascript"></script>',
-                            css='<link rel="stylesheet" href="github-markdown.css">'
-                                '<link rel="stylesheet" href="custom.css">'),
-                             content_type='text/html')
+            self.answer(200, reply=load_from_cache('/template.html').format(
+                content='',
+                script='<script src="/hot-reload.js", type="text/javascript"></script>',
+                css='<link rel="stylesheet" href="github-markdown.css">'
+                    '<link rel="stylesheet" href="custom.css">'),
+                        content_type='text/html')
         elif path.path in {'/github-markdown.css', '/custom.css', '/hot-reload.js'}:
             self.answer(200, load_from_cache(path.path), content_type='text/css')
         elif path.path == '/markdown':
@@ -154,12 +158,13 @@ class MarkdownRequestHandler(BaseHTTPRequestHandler):
                     self.answer(304)
                 else:
                     self.answer(200, headers=(('Etag', self.server.etag),),
-                                     reply=compile_html(mdfile=self.server.mdfile,
-                                                        extensions=self.server.extensions,
-                                                        raw=True),
-                                     content_type='text/html')
+                                reply=compile_html(mdfile=self.server.mdfile,
+                                                   extensions=self.server.extensions,
+                                                   raw=True),
+                                content_type='text/html')
         else:
             self.answer(404)
+
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser(description='Make a complete, styled HTML document from a Markdown file.')
@@ -184,10 +189,12 @@ def parse_args(args=None):
         pass
     return parser.parse_args(args)
 
+
 def write_html(out=None, **kwargs):
     doc = compile_html(**kwargs)
     with (out and open(out, 'w')) or sys.stdout as outstream:
         outstream.write(doc)
+
 
 def main(args=None):
     args = parse_args(args)
@@ -200,6 +207,7 @@ def main(args=None):
         server.serve_forever()
     else:
         write_html(**vars(args))
+
 
 if __name__ == '__main__':
     main()
