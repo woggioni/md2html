@@ -5,81 +5,37 @@ import hashlib
 import sys
 import threading
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from os.path import basename, dirname, abspath
+from os.path import basename, dirname, abspath, join
 from urllib.parse import urlparse
 
 import markdown
 
-TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    {css}
-    <style>
-        body {{
-            font-family: sans-serif;
-        }}
-        code, pre {{
-            font-family: monospace;
-        }}
-        h1 code,
-        h2 code,
-        h3 code,
-        h4 code,
-        h5 code,
-        h6 code {{
-            font-size: inherit;
-        }}
-    </style>
-</head>
-<body>
-    <script type=\"text/javascript\">
-        function req(first) {{
-            var xmlhttp = new XMLHttpRequest();
-            xmlhttp.onload = function() {{
-                if (xmlhttp.status == 200) {{
-                    document.querySelector("div.container").innerHTML = xmlhttp.responseText;
-                }} else if(xmlhttp.status == 304) {{
-                }} else {{
-                    console.log(xmlhttp.status, xmlhttp.statusText);
-                }}
-                req(false);
-            }};
-            xmlhttp.onerror = function() {{
-                console.log(xmlhttp.status, xmlhttp.statusText);
-                setTimeout(req, 1000, false);
-            }};
-            xmlhttp.open("GET", first ? "/markdown" : "/reload", true);
-            xmlhttp.send();
-        }}
-        req(true);
-    </script>
-    <div class="container">
-        {content}
-    </div>
-</body>
-</html>
-"""
 
-def create_css_tag(url_list):
-    result = ''
-    for url in url_list:
-        result += '<link href="%s" rel="stylesheet">' % url
-    return result
+STATIC_CACHE = {}
+def load_from_cache(path):
+    global STATIC_CACHE
+    if path not in STATIC_CACHE:
+        with open(join(dirname(__file__), 'static') + path, 'r') as static_file:
+            STATIC_CACHE[path] = static_file.read()
+    return STATIC_CACHE[path]
 
-def compile_html(mdfile=None, extensions=None, raw=None, stylesheet=(), **kwargs):
+def compile_html(mdfile=None, extensions=None, raw=None, **kwargs):
     html = None
     with mdfile and open(mdfile, 'r') or sys.stdin as instream:
         html = markdown.markdown(instream.read(), extensions=extensions, output_format='html5')
     if raw:
         doc = html
     else:
-        doc = TEMPLATE.format(content=html, css=create_css_tag(stylesheet))
+        css = '        <style>%s\n%s\n        </style>' % (
+            load_from_cache('/github-markdown.css'),
+            load_from_cache('/custom.css')
+        )
+        doc = load_from_cache('/template.html').format(content=html, script='', css=css)
     return doc
 
 class MarkdownHTTPServer(ThreadingHTTPServer):
 
-    def __init__(self, mdfile, extensions=(), stylesheet=(), handler=BaseHTTPRequestHandler, interface="127.0.0.1", port=8080):
+    def __init__(self, mdfile, extensions=(), handler=BaseHTTPRequestHandler, interface="127.0.0.1", port=8080):
         import inotify
         import inotify.adapters
         import signal
@@ -93,7 +49,6 @@ class MarkdownHTTPServer(ThreadingHTTPServer):
 
         self.mdfile = mdfile
         self.extensions = extensions
-        self.stylesheet = stylesheet
         self.condition_variable = threading.Condition()
         self.hash = None
         self.etag = None
@@ -133,6 +88,7 @@ class MarkdownHTTPServer(ThreadingHTTPServer):
 
 
 class MarkdownRequestHandler(BaseHTTPRequestHandler):
+
 
     status_map = {
         200: "OK",
@@ -176,8 +132,13 @@ class MarkdownRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path)
         if path.path == '/':
-            self.answer(200, reply=TEMPLATE.format(content='', css=create_css_tag(self.server.stylesheet)),
+            self.answer(200, reply=load_from_cache('/template.html').format(content='',
+                            script='<script src="/hot-reload.js", type="text/javascript"></script>',
+                            css='<link rel="stylesheet" href="github-markdown.css">'
+                                '<link rel="stylesheet" href="custom.css">'),
                              content_type='text/html')
+        elif path.path in {'/github-markdown.css', '/custom.css', '/hot-reload.js'}:
+            self.answer(200, load_from_cache(path.path), content_type='text/css')
         elif path.path == '/markdown':
             self.markdown_answer()
         elif path.path == '/reload':
@@ -219,9 +180,6 @@ def parse_args(args=None):
                             help='Specify http server port (defaults to 5000)')
         parser.add_argument('-i', '--interface', default='',
                             help='Specify http server listen interface (defaults to localhost)')
-        parser.add_argument('-s', '--stylesheet', nargs='+',
-                            default=['http://netdna.bootstrapcdn.com/twitter-bootstrap/2.3.0/css/bootstrap-combined.min.css'],
-                            help='Specify a list of stylesheet URLs to add to the html page')
     except ImportError:
         pass
     return parser.parse_args(args)
@@ -236,7 +194,6 @@ def main(args=None):
     if hasattr(args, 'watch') and args.watch:
         server = MarkdownHTTPServer(args.mdfile,
                                     extensions=args.extensions,
-                                    stylesheet=args.stylesheet,
                                     interface=args.interface,
                                     port=args.port,
                                     handler=MarkdownRequestHandler)

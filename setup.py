@@ -8,7 +8,7 @@ def read(fname):
 
 config = {
     'name': "md2html",
-    'version': "0.1",
+    'version': "0.2",
     'author': "Walter Oggioni",
     'author_email': "oggioni.walter@gmail.com",
     'description': ("Various development utility scripts"),
@@ -17,6 +17,9 @@ config = {
     'keywords': "build",
     'url': "https://github.com/oggio88/md2html",
     'packages': ['md2html'],
+    'package_data': {
+        '': ['*.html', '*.css', '*.js'],
+    },
     'include_package_data': True,
     'classifiers': [
         'Development Status :: 3 - Alpha',
