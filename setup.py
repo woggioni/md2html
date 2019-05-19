@@ -18,7 +18,7 @@ config = {
     'url': "https://github.com/oggio88/md2html",
     'packages': ['md2html'],
     'package_data': {
-        '': ['*.html', '*.css', '*.js'],
+        'md2html': ['static/*.html', 'static/*.css', 'static/*.js'],
     },
     'include_package_data': True,
     'classifiers': [
