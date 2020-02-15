@@ -39,8 +39,18 @@ def application(env, start_response):
                 cache[path] = digest
             else:
                 digest = cache[path]
-            etag = env.get('HTTP_IF_NONE_MATCH')
-            if etag and etag[1:-1] == digest:
+
+            def parse_etag(etag):
+                if etag is None:
+                    return
+                start = etag.find('"')
+                if start < 0:
+                    return
+                end = etag.find('"', start + 1)
+                return etag[start + 1: end]
+
+            etag = parse_etag(env.get('HTTP_IF_NONE_MATCH'))
+            if etag and etag == digest:
                 start_response('301 Not Modified', [
                     ('Content-Type', 'text/html'),
                     ('Content-Length', str(0)),
