@@ -51,29 +51,25 @@ def application(env, start_response):
 
             etag = parse_etag(env.get('HTTP_IF_NONE_MATCH'))
             if etag and etag == digest:
-                start_response('301 Not Modified', [
-                    ('Content-Type', 'text/html'),
-                    ('Content-Length', str(0)),
+                start_response('304 Not Modified', [
+                    ('Etag', '"%s"' % (digest)),
                     ('Cache-Control', 'no-cache, must-revalidate, max-age=86400'),
-                    ('Connection', 'keep-alive')
                 ])
                 return []
             else:
                 body = compile_html(path, ['extra', 'smarty', 'tables']).encode()
                 start_response('200 OK', [('Content-Type', 'text/html'),
-                                          ('Content-Length', str(len(body))),
-                                          ('Etag', '"%s"' % digest),
+                                          ('Etag', '"%s"' % (digest)),
                                           ('Cache-Control', 'no-cache, must-revalidate, max-age=86400'),
-                                          ('Connection',  'keep-alive'),
                                           ])
                 return [body]
         elif isdir(path):
             body = directory_listing(env['PATH_INFO'], path).encode()
             start_response('200 OK', [
-                ('Content-Type', 'text/html'), ('Content-Length', str(len(body))), ('Connection', 'keep-alive'),
+                ('Content-Type', 'text/html'),
             ])
             return [body]
-    start_response('404 NOT_FOUND', [('Content-Length', str(0)), ('Connection',  'keep-alive')])
+    start_response('404 NOT_FOUND', [])
     return []
 
 
