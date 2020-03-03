@@ -1,6 +1,6 @@
 import logging
 from os import getcwd, listdir
-from os.path import exists, splitext, isfile, join, relpath, isdir, basename
+from os.path import exists, splitext, isfile, join, relpath, isdir, basename, getmtime
 from mimetypes import init as mimeinit, guess_type
 import hashlib
 from .md2html import compile_html
@@ -9,14 +9,16 @@ mimeinit()
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-
 cwd = getcwd()
+
 
 def is_markdown(filepath):
     _, ext = splitext(filepath)
     return ext == ".md"
 
+
 cache = dict()
+
 
 def file_hash(filepath, bufsize=4096):
     if bufsize <= 0:
@@ -30,16 +32,26 @@ def file_hash(filepath, bufsize=4096):
             md5.update(buf)
     return md5.digest()
 
+
 def application(env, start_response):
     path = join(cwd, relpath(env['PATH_INFO'], '/'))
 
     if exists(path):
         if isfile(path):
-            if path not in cache:
+            cache_result = cache.get(path)
+            _mtime = None
+
+            def mtime():
+                nonlocal _mtime
+                if not _mtime:
+                    _mtime = getmtime(path)
+                return _mtime
+
+            if not cache_result or cache_result[1] < mtime():
                 digest = file_hash(path).hex()
-                cache[path] = digest
+                cache[path] = digest, mtime()
             else:
-                digest = cache[path]
+                digest = cache_result[0]
 
             def parse_etag(etag):
                 if etag is None:
@@ -73,6 +85,7 @@ def application(env, start_response):
                             if len(result) == 0:
                                 break
                             yield result
+
                 start_response('200 OK', [('Content-Type', guess_type(basename(path))[0] or 'application/octet-stream'),
                                           ('Etag', '"%s"' % digest),
                                           ('Cache-Control', 'no-cache, must-revalidate, max-age=86400'),
