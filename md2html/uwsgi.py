@@ -1,10 +1,11 @@
 import logging
 from os import getcwd, listdir
-from os.path import exists, splitext, isfile, join, relpath, isdir
-
+from os.path import exists, splitext, isfile, join, relpath, isdir, basename
+from mimetypes import init as mimeinit, guess_type
 import hashlib
 from .md2html import compile_html
 
+mimeinit()
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -33,7 +34,7 @@ def application(env, start_response):
     path = join(cwd, relpath(env['PATH_INFO'], '/'))
 
     if exists(path):
-        if isfile(path) and is_markdown(path):
+        if isfile(path):
             if path not in cache:
                 digest = file_hash(path).hex()
                 cache[path] = digest
@@ -52,21 +53,35 @@ def application(env, start_response):
             etag = parse_etag(env.get('HTTP_IF_NONE_MATCH'))
             if etag and etag == digest:
                 start_response('304 Not Modified', [
-                    ('Etag', '"%s"' % (digest)),
+                    ('Etag', '"%s"' % digest),
                     ('Cache-Control', 'no-cache, must-revalidate, max-age=86400'),
                 ])
                 return []
-            else:
+            elif is_markdown(path):
                 body = compile_html(path, ['extra', 'smarty', 'tables']).encode()
-                start_response('200 OK', [('Content-Type', 'text/html'),
-                                          ('Etag', '"%s"' % (digest)),
+                start_response('200 OK', [('Content-Type', 'text/html; charset=UTF-8'),
+                                          ('Etag', '"%s"' % digest),
                                           ('Cache-Control', 'no-cache, must-revalidate, max-age=86400'),
                                           ])
                 return [body]
+            else:
+                def read_file(file_path):
+                    buffer_size = 1024
+                    with open(file_path, 'rb') as f:
+                        while True:
+                            result = f.read(buffer_size)
+                            if len(result) == 0:
+                                break
+                            yield result
+                start_response('200 OK', [('Content-Type', guess_type(basename(path))[0] or 'application/octet-stream'),
+                                          ('Etag', '"%s"' % digest),
+                                          ('Cache-Control', 'no-cache, must-revalidate, max-age=86400'),
+                                          ])
+                return read_file(path)
         elif isdir(path):
             body = directory_listing(env['PATH_INFO'], path).encode()
             start_response('200 OK', [
-                ('Content-Type', 'text/html'),
+                ('Content-Type', 'text/html; charset=UTF-8'),
             ])
             return [body]
     start_response('404 NOT_FOUND', [])
