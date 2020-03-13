@@ -1,9 +1,11 @@
 import logging
 from os import getcwd, listdir
-from os.path import exists, splitext, isfile, join, relpath, isdir, basename, getmtime
+from os.path import exists, splitext, isfile, join, relpath, isdir, basename, getmtime, dirname
 from mimetypes import init as mimeinit, guess_type
 import hashlib
 from .md2html import compile_html
+from shutil import which
+from subprocess import Popen, PIPE, check_output
 
 mimeinit()
 log = logging.getLogger(__name__)
@@ -12,9 +14,17 @@ logging.basicConfig(level=logging.INFO)
 cwd = getcwd()
 
 
-def is_markdown(filepath):
+def has_extension(filepath, extension):
     _, ext = splitext(filepath)
-    return ext == ".md"
+    return ext == extension
+
+
+def is_markdown(filepath):
+    return has_extension(filepath, ".md")
+
+
+def is_dotfile(filepath):
+    return has_extension(filepath, ".dot")
 
 
 cache = dict()
@@ -72,6 +82,13 @@ def application(env, start_response):
             elif is_markdown(path):
                 body = compile_html(path, ['extra', 'smarty', 'tables']).encode()
                 start_response('200 OK', [('Content-Type', 'text/html; charset=UTF-8'),
+                                          ('Etag', '"%s"' % digest),
+                                          ('Cache-Control', 'no-cache, must-revalidate, max-age=86400'),
+                                          ])
+                return [body]
+            elif is_dotfile(path) and which("dot"):
+                body = check_output(['dot', '-Tsvg', basename(path)], cwd=dirname(path))
+                start_response('200 OK', [('Content-Type', 'image/svg+xml; charset=UTF-8'),
                                           ('Etag', '"%s"' % digest),
                                           ('Cache-Control', 'no-cache, must-revalidate, max-age=86400'),
                                           ])
