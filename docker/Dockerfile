@@ -1,7 +1,7 @@
 FROM alpine:latest
 MAINTAINER Oggioni Walter <oggioni.walter@gmail.com>
 RUN apk update
-RUN apk add python3 uwsgi uwsgi-python3
+RUN apk add python3 uwsgi uwsgi-python3 graphviz
 RUN mkdir /srv/http
 VOLUME /srv/http
 WORKDIR /srv/http
