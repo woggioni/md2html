@@ -4,7 +4,7 @@ import argparse
 import hashlib
 import sys
 import threading
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, socketserver, HTTPServer
 from os.path import basename, dirname, abspath, join
 from urllib.parse import urlparse
 
@@ -34,6 +34,10 @@ def compile_html(mdfile=None, extensions=None, raw=None, **kwargs):
         )
         doc = load_from_cache('/template.html').format(content=html, script='', css=css)
     return doc
+
+
+class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    pass
 
 
 class MarkdownHTTPServer(ThreadingHTTPServer):
