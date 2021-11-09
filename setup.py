@@ -15,7 +15,7 @@ config = {
     'long_description': '',
     'license': "MIT",
     'keywords': "build",
-    'url': "https://github.com/oggio88/md2html",
+    'url': "https://github.com/woggioni/md2html",
     'packages': ['md2html'],
     'package_data': {
         'md2html': ['static/*.html', 'static/*.css', 'static/*.js'],

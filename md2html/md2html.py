@@ -43,8 +43,8 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 class MarkdownHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, mdfile, extensions=(), handler=BaseHTTPRequestHandler, interface="127.0.0.1", port=8080):
-        import inotify
-        import inotify.adapters
+        from watchdog.observers import Observer
+        from watchdog.events import PatternMatchingEventHandler
         import signal
 
         self.stop = False
@@ -61,26 +61,23 @@ class MarkdownHTTPServer(ThreadingHTTPServer):
         self.hash = None
         self.etag = None
 
-        def watch_file():
-            watcher = inotify.adapters.Inotify()
-            watcher.add_watch(dirname(abspath(self.mdfile)))
-            target_file = basename(self.mdfile)
-            while True:
-                if self.stop:
-                    break
-                for event in watcher.event_gen(yield_nones=True, timeout_s=1):
-                    if not event:
-                        continue
-                    (_, event_type, path, filename) = event
-                    if filename == target_file and len(set(event_type).intersection(
-                            {'IN_CLOSE_WRITE'})):
-                        self.condition_variable.acquire()
-                        if self.update_file_digest():
-                            self.condition_variable.notify_all()
-                        self.condition_variable.release()
+        event_handler = PatternMatchingEventHandler(
+            patterns=[mdfile],
+            ignore_patterns=None,
+            ignore_directories=True,
+            case_sensitive=True)
 
-        file_watcher = threading.Thread(target=watch_file)
-        file_watcher.start()
+        def on_modified(evt):
+            self.condition_variable.acquire()
+            if self.update_file_digest():
+                self.condition_variable.notify_all()
+            self.condition_variable.release()
+
+        event_handler.on_modified = on_modified
+
+        self.observer = Observer()
+        self.observer.schedule(event_handler, path=dirname(abspath(self.mdfile)), recursive=False)
+        self.observer.start()
         super().__init__((interface, port), handler)
 
     def update_file_digest(self):
@@ -180,8 +177,7 @@ def parse_args(args=None):
                         help='Activate specified markdown extensions (defaults to "extra smarty tables")')
 
     try:
-        import inotify
-        import gevent
+        import watchdog
         import signal
         parser.add_argument('-w', '--watch', action='store_true',
                             help='Watch specified source file and rerun the compilation for every time it changes')
