@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "md2html"
+version = "0.3"
+authors = [
+  { name="Walter Oggioni", email="oggioni.walter@gmail.com" },
+]
+description = "Markdown to HTML renderer"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+        'Development Status :: 3 - Alpha',
+        'Topic :: Utilities',
+        'License :: OSI Approved :: MIT License',
+        'Intended Audience :: System Administrators',
+        'Intended Audience :: Developers',
+        'Environment :: Console',
+        'License :: OSI Approved :: MIT License',
+        'Programming Language :: Python :: 3',
+]
+dependencies = [
+    "gevent",
+    "greenlet",
+    "Markdown",
+    "Pygments",
+    "watchdog",
+    "zope.event",
+    "zope.interface"
+]
+
+[tool.setuptools.package-data]
+md2html = ['static/*.html', 'static/*.css', 'static/*.js']
+
+[project.urls]
+"Homepage" = "https://github.com/woggioni/md2html"
+"Bug Tracker" = "https://github.com/woggioni/md2html/issues"
+
+[tool.mypy]
+python_version = "3.10"
+disallow_untyped_defs = true
+show_error_codes = true
+no_implicit_optional = true
+warn_return_any = true
+warn_unused_ignores = true
+exclude = ["scripts", "docs", "test"]
+strict = true

@@ -13,7 +13,7 @@ function req(first) {
         console.log(xmlhttp.status, xmlhttp.statusText);
         setTimeout(req, 1000, false);
     };
-    xmlhttp.open("GET", first ? "/markdown" : "/reload", true);
+    xmlhttp.open("GET", location.pathname + "?reload", true);
     xmlhttp.send();
 }
 req(true);
