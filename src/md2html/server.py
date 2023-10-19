@@ -84,25 +84,16 @@ class Server:
                                     lambda: getmtime(path)
                                 )
                                 if etag != digest:
-                                    body = compile_html(path,
-                                                        MARDOWN_EXTENSIONS,
-                                                        raw=True).encode()
-                                    start_response('200 OK', [('Content-Type', 'text/html; charset=UTF-8'),
-                                                              ('Etag', 'W/"%s"' % digest),
-                                                              ('Cache-Control', 'no-cache'),
-                                                              ])
-                                    return [body]
+                                    if exists(path) and isfile(path):
+                                        return self.render_markdown(url_path, path, True, digest, start_response)
+                                    else:
+                                        return self.not_found(start_response)
                         finally:
                             subscription.unsubscribe()
                     return self.not_modified(start_response, digest)
                 elif is_markdown(path):
                     raw = query_string == 'reload'
-                    body = compile_html(path, MARDOWN_EXTENSIONS, raw=raw).encode()
-                    start_response('200 OK', [('Content-Type', 'text/html; charset=UTF-8'),
-                                              ('Etag', 'W/"%s"' % digest),
-                                              ('Cache-Control', 'no-cache'),
-                                              ])
-                    return [body]
+                    return self.render_markdown(url_path, path, raw, digest, start_response)
                 elif is_dotfile(path) and which("dot"):
                     body = check_output(['dot', '-Tsvg', basename(path)], cwd=dirname(path))
                     start_response('200 OK', [('Content-Type', 'image/svg+xml; charset=UTF-8'),
@@ -132,8 +123,7 @@ class Server:
                     ('Content-Type', 'text/html; charset=UTF-8'),
                 ])
                 return [body]
-        start_response('404 NOT_FOUND', [])
-        return []
+        return self.not_found(start_response)
 
     @staticmethod
     def stream_hash(source: BinaryIO, bufsize=0x1000) -> bytes:
@@ -197,11 +187,31 @@ class Server:
         return etag, digest
 
     @staticmethod
+    def render_markdown(url_path: 'StrOrBytesPath',
+                        path: str,
+                        raw: bool,
+                        digest: str,
+                        start_response) -> list[bytes]:
+        body = compile_html(url_path,
+                            path,
+                            MARDOWN_EXTENSIONS,
+                            raw=raw).encode()
+        start_response('200 OK', [('Content-Type', 'text/html; charset=UTF-8'),
+                                  ('Etag', 'W/"%s"' % digest),
+                                  ('Cache-Control', 'no-cache'),
+                                  ])
+        return [body]
+    @staticmethod
     def not_modified(start_response, digest: str, cache_control=('Cache-Control', 'no-cache')) -> []:
         start_response('304 Not Modified', [
             ('Etag', f'W/"{digest}"'),
             cache_control,
         ])
+        return []
+
+    @staticmethod
+    def not_found(start_response) -> list[bytes]:
+        start_response('404 NOT_FOUND', [])
         return []
 
     @staticmethod

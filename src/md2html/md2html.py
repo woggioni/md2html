@@ -1,5 +1,5 @@
 import sys
-from os.path import dirname, join
+from os.path import dirname, join, relpath
 from time import time
 from typing import Optional
 
@@ -23,7 +23,8 @@ def load_from_cache(path) -> tuple[str, float]:
     return STATIC_CACHE[path]
 
 
-def compile_html(mdfile=None,
+def compile_html(url_path,
+                 mdfile=None,
                  extensions: Optional[list[str]] = None,
                  raw: bool = False) -> str:
     with mdfile and open(mdfile, 'r') or sys.stdin as instream:
@@ -31,11 +32,11 @@ def compile_html(mdfile=None,
     if raw:
         doc = html
     else:
-        css = '        <style>% s\n%s\n%s\n        </style>' % (
-            load_from_cache('/github-markdown.css')[0],
-            load_from_cache('/pygment.css')[0],
-            load_from_cache('/custom.css')[0],
-        )
-        script = '<script src="/hot-reload.js", type="text/javascript" defer="true"></script>'
+        parent = dirname(url_path)
+        prefix = relpath('/', start=parent)
+        script = f'<script src="{prefix}/hot-reload.js", type="text/javascript" defer="true"></script>'
+        css = ''
+        for css_file in ('github-markdown.css', 'pygment.css', 'custom.css'):
+            css += f'        <link rel="stylesheet" href="{prefix}/{css_file}">'
         doc = load_from_cache('/template.html')[0].format(content=html, script=script, css=css)
     return doc
