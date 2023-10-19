@@ -1,8 +1,10 @@
+build==1.0.3
 gevent==23.9.1
 greenlet==3.0.0
 Markdown==3.5
--e git+ssh://git@github.com/woggioni/md2html.git@67948f81c4cd118b26157c36e901ae8b17103624#egg=md2html
+packaging==23.2
 Pygments==2.16.1
+pyproject_hooks==1.0.0
 watchdog==3.0.0
 zope.event==5.0
 zope.interface==6.1
