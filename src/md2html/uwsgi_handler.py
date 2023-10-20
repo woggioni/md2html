@@ -1,6 +1,6 @@
 import logging
 from .server import Server
-from uwsgi import log
+from uwsgi import log, opt
 class UwsgiHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -13,7 +13,7 @@ logging.basicConfig(
     handlers=[UwsgiHandler()]
 )
 
-server = Server()
+server = Server(prefix=opt.get('prefix', None))
 
 def application(env, start_response):
     return server.handle_request(

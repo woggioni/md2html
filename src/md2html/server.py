@@ -1,6 +1,6 @@
 import logging
 from os import getcwd, listdir
-from os.path import exists, splitext, isfile, join, relpath, isdir, basename, getmtime, dirname
+from os.path import exists, splitext, isfile, join, relpath, isdir, basename, getmtime, dirname, normpath
 from mimetypes import init as mimeinit, guess_type
 import hashlib
 from .md2html import compile_html, load_from_cache, STATIC_RESOURCES, MARDOWN_EXTENSIONS
@@ -33,17 +33,20 @@ def is_dotfile(filepath):
 
 class Server:
 
-    def __init__(self, root_dir: 'StrOrBytesPath' = getcwd()):
+    def __init__(self, root_dir: 'StrOrBytesPath' = getcwd(), prefix: Optional['StrOrBytesPath'] = None):
         self.root_dir = root_dir
         self.cache = dict['StrOrBytesPath', tuple[str, float]]()
         self.file_watcher = FileWatcher(cwd)
         self.logger = logging.getLogger(Server.__name__)
+        self.prefix = prefix and normpath(f'{prefix.decode()}')
 
     def handle_request(self, method: str, url_path: str, etag: Optional[str], query_string: Optional[str], start_response):
         if method != 'GET':
             start_response('405', [])
             return []
-        path: 'StrOrBytesPath' = join(self.root_dir, relpath(url_path, '/'))
+        relative_path = relpath(url_path, start=self.prefix or '/')
+        url_path: 'StrOrBytesPath' = normpath(join('/', relative_path))
+        path: 'StrOrBytesPath' = join(self.root_dir, relative_path)
         if url_path in STATIC_RESOURCES:
             content, mtime = load_from_cache(url_path)
             content = content.encode()
@@ -186,14 +189,15 @@ class Server:
         etag = Server.parse_etag(etag_header)
         return etag, digest
 
-    @staticmethod
-    def render_markdown(url_path: 'StrOrBytesPath',
+    def render_markdown(self,
+                        url_path: 'StrOrBytesPath',
                         path: str,
                         raw: bool,
                         digest: str,
                         start_response) -> list[bytes]:
         body = compile_html(url_path,
                             path,
+                            self.prefix,
                             MARDOWN_EXTENSIONS,
                             raw=raw).encode()
         start_response('200 OK', [('Content-Type', 'text/html; charset=UTF-8'),
@@ -214,10 +218,11 @@ class Server:
         start_response('404 NOT_FOUND', [])
         return []
 
-    @staticmethod
-    def directory_listing(path_info, path) -> str:
+    def directory_listing(self, path_info, path) -> str:
+        icon_path = join(self.prefix or '', 'markdown.svg')
         title = "Directory listing for %s" % path_info
         result = "<!DOCTYPE html><html><head>"
+        result += f'<link rel="icon" type="image/x-icon" href="{icon_path}">'
         result += "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">"
         result += "<title>" + title + "</title></head>"
         result += "<body><h1>" + title + "</h1><hr>"

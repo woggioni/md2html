@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [tool.setuptools.package-data]
-md2html = ['static/*.html', 'static/*.css', 'static/*.js']
+md2html = ['static/*']
 
 [project.urls]
 "Homepage" = "https://github.com/woggioni/md2html"
