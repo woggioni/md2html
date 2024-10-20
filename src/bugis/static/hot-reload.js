@@ -1,5 +1,6 @@
 function req(first) {
-    var xmlhttp = new XMLHttpRequest();
+    const start = new Date().getTime();
+    const xmlhttp = new XMLHttpRequest();
     xmlhttp.onload = function() {
         if (xmlhttp.status == 200) {
             document.querySelector("article.markdown-body").innerHTML = xmlhttp.responseText;
@@ -7,7 +8,8 @@ function req(first) {
         } else {
             console.log(xmlhttp.status, xmlhttp.statusText);
         }
-        req(false);
+        const nextCall = Math.min(1000, Math.max(0, 1000 - (new Date().getTime() - start)));
+        setTimeout(req, nextCall, false);
     };
     xmlhttp.onerror = function() {
         console.log(xmlhttp.status, xmlhttp.statusText);

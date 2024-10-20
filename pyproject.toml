@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "bugis"
-version = "1.0"
+dynamic = ["version"]
 authors = [
   { name="Walter Oggioni", email="oggioni.walter@gmail.com" },
 ]
@@ -55,3 +55,5 @@ warn_return_any = true
 warn_unused_ignores = true
 exclude = ["scripts", "docs", "test"]
 strict = true
+
+[tool.setuptools_scm]
