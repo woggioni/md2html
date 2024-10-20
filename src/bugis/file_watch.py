@@ -5,26 +5,32 @@ from watchdog.events import PatternMatchingEventHandler, FileSystemEvent, \
     FileCreatedEvent, FileModifiedEvent, FileClosedEvent, FileMovedEvent
 from watchdog.observers import Observer
 import logging
-from gevent.event import Event
-
+# from gevent.event import Event
+from asyncio import Future, BaseEventLoop
 
 class Subscription:
+    _unsubscribe_callback: Callable[['Subscription'], None]
+    _event: Future
+    _loop: BaseEventLoop
 
-    def __init__(self, unsubscribe: Callable[['Subscription'], None]):
+    def __init__(self, unsubscribe: Callable[['Subscription'], None], loop: BaseEventLoop):
         self._unsubscribe_callback = unsubscribe
-        self._event: Event = Event()
+        self._event: Future = loop.create_future()
+        self._loop = loop
 
     def unsubscribe(self) -> None:
         self._unsubscribe_callback(self)
 
-    def wait(self, tout: float) -> bool:
+    async def wait(self, tout: float) -> bool:
+        handle = self._loop.call_later(tout, lambda: self._event.cancel())
+        await self._event
         return self._event.wait(tout)
 
     def notify(self) -> None:
-        self._event.set()
+        self._event.set_result(None)
 
     def reset(self) -> None:
-        self._event.clear()
+        self._event = self._loop.create_future()
 
 
 class FileWatcher(PatternMatchingEventHandler):

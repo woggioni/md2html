@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "md2html"
-version = "0.3"
+name = "bugis"
+version = "1.0"
 authors = [
   { name="Walter Oggioni", email="oggioni.walter@gmail.com" },
 ]
@@ -22,29 +22,32 @@ classifiers = [
         'Programming Language :: Python :: 3',
 ]
 dependencies = [
-    "gevent",
-    "greenlet",
     "Markdown",
     "Pygments",
     "watchdog",
-    "zope.event",
-    "zope.interface"
+    "pwo",
+    "PyYAML",
+    "pygraphviz"
 ]
 
 [project.optional-dependencies]
 dev = [
-    "build", "pip-tools", "mypy", "ipdb"
+    "build", "granian", "mypy", "ipdb", "twine"
+]
+
+run = [
+    "granian"
 ]
 
 [tool.setuptools.package-data]
-md2html = ['static/*']
+bugis = ['static/*', 'default-conf/*']
 
 [project.urls]
-"Homepage" = "https://github.com/woggioni/md2html"
-"Bug Tracker" = "https://github.com/woggioni/md2html/issues"
+"Homepage" = "https://github.com/woggioni/bugis"
+"Bug Tracker" = "https://github.com/woggioni/bugis/issues"
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 disallow_untyped_defs = true
 show_error_codes = true
 no_implicit_optional = true

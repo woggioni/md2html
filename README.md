@@ -9,3 +9,4 @@ uwsgi --need-plugin /usr/lib/uwsgi/python_plugin.so \
       --http-auto-chunked \ 
       --gevent 10
 ```
+

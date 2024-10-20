@@ -5,10 +5,11 @@ from mimetypes import init as mimeinit, guess_type
 import hashlib
 from .md2html import compile_html, load_from_cache, STATIC_RESOURCES, MARDOWN_EXTENSIONS
 from shutil import which
-from subprocess import check_output
+import pygraphviz as pgv
 from io import BytesIO
 from typing import Callable, TYPE_CHECKING, BinaryIO, Optional
-from .file_watch import FileWatcher
+from .async_watchdog import FileWatcher
+from pwo import Maybe
 
 if TYPE_CHECKING:
     from _typeshed import StrOrBytesPath
@@ -40,10 +41,17 @@ class Server:
         self.logger = logging.getLogger(Server.__name__)
         self.prefix = prefix and normpath(f'{prefix.decode()}')
 
-    def handle_request(self, method: str, url_path: str, etag: Optional[str], query_string: Optional[str], start_response):
+    async def handle_request(self, method: str, url_path: str, etag: Optional[str], query_string: Optional[str], send):
         if method != 'GET':
-            start_response('405', [])
-            return []
+            await send({
+                'type': 'http.response.start',
+                'status': 405
+            })
+            await send({
+                'type': 'http.response.body',
+                'body': b'',
+            })
+            return
         relative_path = relpath(url_path, start=self.prefix or '/')
         url_path: 'StrOrBytesPath' = normpath(join('/', relative_path))
         path: 'StrOrBytesPath' = join(self.root_dir, relative_path)
@@ -57,15 +65,25 @@ class Server:
                 lambda: mtime
             )
             if etag and etag == digest:
-                return self.not_modified(start_response, digest, ('Cache-Control', 'must-revalidate, max-age=86400'))
+                await self.not_modified(send, digest, ('Cache-Control', 'must-revalidate, max-age=86400'))
+                return
             elif content:
                 mime_type = guess_type(basename(url_path))[0] or 'application/octet-stream'
-                start_response('200 OK', [
-                    ('Content-Type', f'{mime_type}; charset=UTF-8'),
-                    ('Etag', 'W/"%s"' % digest),
-                    ('Cache-Control', 'must-revalidate, max-age=86400'),
-                ])
-                return content
+                await send({
+                    'type': 'http.response.start',
+                    'status': 200,
+                    'headers': [
+                        (b'content-type', f'{mime_type}; charset=UTF-8'.encode()),
+                        (b'etag', f'W/"{digest}"'.encode()),
+                        (b'content-type', f'{mime_type}; charset=UTF-8'.encode()),
+                        (b'Cache-Control', b'must-revalidate, max-age=86400'),
+                    ]
+                })
+                await send({
+                    'type': 'http.response.body',
+                    'body': content
+                })
+                return
         elif exists(path):
             if isfile(path):
                 etag, digest = self.compute_etag_and_digest(
@@ -74,11 +92,12 @@ class Server:
                     lambda: open(path, 'rb'),
                     lambda: getmtime(path)
                 )
+                self.logger.debug('%s %s', etag, digest)
                 if etag and etag == digest:
                     if is_markdown(path) and query_string == 'reload':
                         subscription = self.file_watcher.subscribe(path)
                         try:
-                            has_changed = subscription.wait(30)
+                            has_changed = await subscription.wait(30)
                             if has_changed:
                                 _, digest = self.compute_etag_and_digest(
                                     etag,
@@ -88,22 +107,33 @@ class Server:
                                 )
                                 if etag != digest:
                                     if exists(path) and isfile(path):
-                                        return self.render_markdown(url_path, path, True, digest, start_response)
+                                        await self.render_markdown(url_path, path, True, digest, send)
+                                        return
                                     else:
-                                        return self.not_found(start_response)
+                                        await self.not_found(send)
+                                        return
                         finally:
                             subscription.unsubscribe()
-                    return self.not_modified(start_response, digest)
+                    await self.not_modified(send, digest)
                 elif is_markdown(path):
                     raw = query_string == 'reload'
-                    return self.render_markdown(url_path, path, raw, digest, start_response)
+                    await self.render_markdown(url_path, path, raw, digest, send)
                 elif is_dotfile(path) and which("dot"):
-                    body = check_output(['dot', '-Tsvg', basename(path)], cwd=dirname(path))
-                    start_response('200 OK', [('Content-Type', 'image/svg+xml; charset=UTF-8'),
-                                              ('Etag', 'W/"%s"' % digest),
-                                              ('Cache-Control', 'no-cache'),
-                                              ])
-                    return [body]
+                    graph = pgv.AGraph(path)
+                    body = graph.draw(None, format="svg", prog="dot")
+                    await send({
+                        'type': 'http.response.start',
+                        'status': 200,
+                        'headers': (
+                            (b'Content-Type', b'image/svg+xml; charset=UTF-8'),
+                            (b'Etag', f'W/"{digest}"'.encode()),
+                            (b'Cache-Control', b'no-cache'),
+                        )
+                    })
+                    await send({
+                        'type': 'http.response.body',
+                        'body': body
+                    })
                 else:
                     def read_file(file_path):
                         buffer_size = 1024
@@ -114,19 +144,34 @@ class Server:
                                     break
                                 yield result
 
-                    start_response('200 OK',
-                                   [('Content-Type', guess_type(basename(path))[0] or 'application/octet-stream'),
-                                    ('Etag', 'W/"%s"' % digest),
-                                    ('Cache-Control', 'no-cache'),
-                                    ])
-                    return read_file(path)
+                    await send({
+                        'type': 'http.response.start',
+                        'status': 200,
+                        'headers': (
+                            (b'Content-Type', guess_type(basename(path))[0].encode() or b'application/octet-stream'),
+                            (b'Etag', f'W/"{digest}"'),
+                            (b'Cache-Control', b'no-cache')
+                        )
+                    })
+                    await send({
+                        'type': 'http.response.body',
+                        'body': read_file(path)
+                    })
             elif isdir(path):
                 body = self.directory_listing(url_path, path).encode()
-                start_response('200 OK', [
-                    ('Content-Type', 'text/html; charset=UTF-8'),
-                ])
-                return [body]
-        return self.not_found(start_response)
+                await send({
+                    'type': 'http.response.start',
+                    'status': 200,
+                    'headers': (
+                        (b'Content-Type', b'text/html; charset=UTF-8'),
+                    )
+                })
+                await send({
+                    'type': 'http.response.body',
+                    'body': body
+                })
+        else:
+            await self.not_found(send)
 
     @staticmethod
     def stream_hash(source: BinaryIO, bufsize=0x1000) -> bytes:
@@ -155,13 +200,17 @@ class Server:
 
     @staticmethod
     def parse_etag(etag: str) -> Optional[str]:
-        if etag is None:
-            return
-        start = etag.find('"')
-        if start < 0:
-            return
-        end = etag.find('"', start + 1)
-        return etag[start + 1: end]
+        def skip_weak_marker(s):
+            if s.startswith('W/'):
+                return s[2:]
+            else:
+                return s
+
+        return (
+            Maybe.of_nullable(etag)
+                .map(skip_weak_marker)
+                .or_else(None)
+        )
 
     def compute_etag_and_digest(
             self,
@@ -189,34 +238,55 @@ class Server:
         etag = Server.parse_etag(etag_header)
         return etag, digest
 
-    def render_markdown(self,
+    async def render_markdown(self,
                         url_path: 'StrOrBytesPath',
                         path: str,
                         raw: bool,
                         digest: str,
-                        start_response) -> list[bytes]:
+                        send) -> list[bytes]:
         body = compile_html(url_path,
                             path,
                             self.prefix,
                             MARDOWN_EXTENSIONS,
                             raw=raw).encode()
-        start_response('200 OK', [('Content-Type', 'text/html; charset=UTF-8'),
-                                  ('Etag', 'W/"%s"' % digest),
-                                  ('Cache-Control', 'no-cache'),
-                                  ])
-        return [body]
+        await send({
+            'type': 'http.response.start',
+            'status': 200,
+            'headers': (
+                (b'Content-Type', b'text/html; charset=UTF-8'),
+                (b'Etag', f'W/{digest}'.encode()),
+                (b'Cache-Control', b'no-cache'),
+            )
+        })
+        await send({
+            'type': 'http.response.body',
+            'body': body
+        })
+        return
     @staticmethod
-    def not_modified(start_response, digest: str, cache_control=('Cache-Control', 'no-cache')) -> []:
-        start_response('304 Not Modified', [
-            ('Etag', f'W/"{digest}"'),
-            cache_control,
-        ])
-        return []
+    async def not_modified(send, digest: str, cache_control=('Cache-Control', 'no-cache')) -> []:
+        await send({
+            'type': 'http.response.start',
+            'status': 304,
+            'headers': (
+                (b'Etag', f'W/{digest}'.encode()),
+                cache_control
+            )
+        })
+        await send({
+            'type': 'http.response.body',
+        })
+        return
 
     @staticmethod
-    def not_found(start_response) -> list[bytes]:
-        start_response('404 NOT_FOUND', [])
-        return []
+    async def not_found(send) -> None:
+        await send({
+            'type': 'http.response.start',
+            'status': 404
+        })
+        await send({
+            'type': 'http.response.body',
+        })
 
     def directory_listing(self, path_info, path) -> str:
         icon_path = join(self.prefix or '', 'markdown.svg')
