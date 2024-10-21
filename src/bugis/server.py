@@ -1,13 +1,22 @@
 import logging
-from os import getcwd, listdir
-from os.path import exists, splitext, isfile, join, relpath, isdir, basename, getmtime, dirname, normpath
+from os import getcwd
 from mimetypes import init as mimeinit, guess_type
 import hashlib
+
+from os.path import join, normpath, splitext, relpath, basename
+from asyncio import Future
+from aiofiles.os import listdir
+from aiofiles.ospath import exists, isdir, isfile, getmtime
+from aiofiles import open as async_open
+from aiofiles.base import AiofilesContextManager
+from aiofiles.threadpool.binary import AsyncBufferedReader
+from asyncio import get_running_loop
+
 from .md2html import compile_html, load_from_cache, STATIC_RESOURCES, MARDOWN_EXTENSIONS
 from shutil import which
 import pygraphviz as pgv
 from io import BytesIO
-from typing import Callable, TYPE_CHECKING, BinaryIO, Optional
+from typing import Callable, TYPE_CHECKING, Optional, Awaitable, AsyncGenerator, Any
 from .async_watchdog import FileWatcher
 from pwo import Maybe
 
@@ -18,6 +27,11 @@ mimeinit()
 
 cwd: 'StrOrBytesPath' = getcwd()
 
+
+def completed_future[T](result : T) -> Future[T]:
+    future = Future()
+    future.set_result(result)
+    return future
 
 def has_extension(filepath, extension):
     _, ext = splitext(filepath)
@@ -58,11 +72,11 @@ class Server:
         if url_path in STATIC_RESOURCES:
             content, mtime = load_from_cache(url_path)
             content = content.encode()
-            etag, digest = self.compute_etag_and_digest(
+            etag, digest = await self.compute_etag_and_digest(
                 etag,
                 url_path,
-                lambda: BytesIO(content),
-                lambda: mtime
+                lambda: AiofilesContextManager(completed_future(AsyncBufferedReader(BytesIO(content), loop=get_running_loop()))),
+                lambda: completed_future(mtime)
             )
             if etag and etag == digest:
                 await self.not_modified(send, digest, ('Cache-Control', 'must-revalidate, max-age=86400'))
@@ -84,12 +98,12 @@ class Server:
                     'body': content
                 })
                 return
-        elif exists(path):
-            if isfile(path):
-                etag, digest = self.compute_etag_and_digest(
+        elif await exists(path):
+            if await isfile(path):
+                etag, digest = await self.compute_etag_and_digest(
                     etag,
                     path,
-                    lambda: open(path, 'rb'),
+                    lambda: async_open(path, 'rb'),
                     lambda: getmtime(path)
                 )
                 self.logger.debug('%s %s', etag, digest)
@@ -99,14 +113,14 @@ class Server:
                         try:
                             has_changed = await subscription.wait(30)
                             if has_changed:
-                                _, digest = self.compute_etag_and_digest(
+                                _, digest = await self.compute_etag_and_digest(
                                     etag,
                                     path,
-                                    lambda: open(path, 'rb'),
+                                    lambda: async_open(path, 'rb'),
                                     lambda: getmtime(path)
                                 )
                                 if etag != digest:
-                                    if exists(path) and isfile(path):
+                                    if exists(path) and await isfile(path):
                                         await self.render_markdown(url_path, path, True, digest, send)
                                         return
                                     else:
@@ -135,11 +149,11 @@ class Server:
                         'body': body
                     })
                 else:
-                    def read_file(file_path):
-                        buffer_size = 1024
-                        with open(file_path, 'rb') as f:
+                    async def read_file(file_path):
+                        buffer_size = 0x10000
+                        async with async_open(file_path, 'rb') as f:
                             while True:
-                                result = f.read(buffer_size)
+                                result = await f.read(buffer_size)
                                 if len(result) == 0:
                                     break
                                 yield result
@@ -153,12 +167,21 @@ class Server:
                             (b'Cache-Control', b'no-cache')
                         )
                     })
+
+                    async for chunk in read_file(path):
+                        await send({
+                            'type': 'http.response.body',
+                            'body': chunk,
+                            'more_body': True
+                        })
                     await send({
                         'type': 'http.response.body',
-                        'body': read_file(path)
+                        'body': b'',
+                        'more_body': False
                     })
-            elif isdir(path):
-                body = self.directory_listing(url_path, path).encode()
+
+            elif await isdir(path):
+                body = (await self.directory_listing(url_path, path)).encode()
                 await send({
                     'type': 'http.response.start',
                     'status': 200,
@@ -174,25 +197,25 @@ class Server:
             await self.not_found(send)
 
     @staticmethod
-    def stream_hash(source: BinaryIO, bufsize=0x1000) -> bytes:
+    async def stream_hash(source: AsyncBufferedReader, bufsize=0x1000) -> bytes:
         if bufsize <= 0:
             raise ValueError("Buffer size must be greater than 0")
         md5 = hashlib.md5()
         while True:
-            buf = source.read(bufsize)
+            buf = await source.read(bufsize)
             if len(buf) == 0:
                 break
             md5.update(buf)
         return md5.digest()
 
     @staticmethod
-    def file_hash(filepath, bufsize=0x1000) -> bytes:
+    async def file_hash(filepath, bufsize=0x1000) -> bytes:
         if bufsize <= 0:
             raise ValueError("Buffer size must be greater than 0")
         md5 = hashlib.md5()
-        with open(filepath, 'rb') as f:
+        async with async_open(filepath, 'rb') as f:
             while True:
-                buf = f.read(bufsize)
+                buf = await f.read(bufsize)
                 if len(buf) == 0:
                     break
                 md5.update(buf)
@@ -212,26 +235,26 @@ class Server:
                 .or_else(None)
         )
 
-    def compute_etag_and_digest(
+    async def compute_etag_and_digest(
             self,
             etag_header: str,
             path: str,
-            stream_source: Callable[[], BinaryIO],
-            mtime_supplier: Callable[[], float]
+            stream_source: Callable[[], AiofilesContextManager[AsyncBufferedReader]],
+            mtime_supplier: Callable[[], Awaitable[float]]
     ) -> tuple[str, str]:
         cache_result = self.cache.get(path)
         _mtime: Optional[float] = None
 
-        def mtime() -> float:
+        async def mtime() -> float:
             nonlocal _mtime
             if not _mtime:
-                _mtime = mtime_supplier()
+                _mtime = await mtime_supplier()
             return _mtime
 
-        if not cache_result or cache_result[1] < mtime():
-            with stream_source() as stream:
-                digest = Server.stream_hash(stream).hex()
-            self.cache[path] = digest, mtime()
+        if not cache_result or cache_result[1] < await mtime():
+            async with stream_source() as stream:
+                digest = (await Server.stream_hash(stream)).hex()
+            self.cache[path] = digest, await mtime()
         else:
             digest = cache_result[0]
 
@@ -288,7 +311,7 @@ class Server:
             'type': 'http.response.body',
         })
 
-    def directory_listing(self, path_info, path) -> str:
+    async def directory_listing(self, path_info, path) -> str:
         icon_path = join(self.prefix or '', 'markdown.svg')
         title = "Directory listing for %s" % path_info
         result = "<!DOCTYPE html><html><head>"
@@ -300,11 +323,17 @@ class Server:
         if path_info != '/':
             result += "<li><a href=\"../\"/>../</li>"
 
-        def ls(filter):
-            return (entry for entry in sorted(listdir(path)) if filter(join(path, entry)))
+        async def ls(filter: Callable[[str], Awaitable[bool]]) -> AsyncGenerator[str, Any]:
+            async def result():
+                for entry in sorted(await listdir(path)):
+                    if await filter(join(path, entry)):
+                        yield entry
+            return result()
 
-        for entry in ls(isdir):
+        async for entry in await ls(isdir):
             result += '<li><a href="' + entry + '/' + '"/>' + entry + '/' + '</li>'
-        for entry in ls(lambda entry: isfile(entry) and is_markdown(entry)):
+        async def file_filter(entry: str) -> bool:
+            return await isfile(entry) and is_markdown(entry)
+        async for entry in await ls(file_filter):
             result += '<li><a href="' + entry + '"/>' + entry + '</li>'
         return result

@@ -7,6 +7,8 @@
 --index-url https://gitea.woggioni.net/api/packages/woggioni/pypi/simple
 --extra-index-url https://pypi.org/simple
 
+aiofiles==24.1.0
+    # via bugis (pyproject.toml)
 asttokens==2.4.1
     # via stack-data
 build==1.2.2.post1

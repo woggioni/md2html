@@ -27,7 +27,8 @@ dependencies = [
     "watchdog",
     "pwo",
     "PyYAML",
-    "pygraphviz"
+    "pygraphviz",
+    "aiofiles"
 ]
 
 [project.optional-dependencies]

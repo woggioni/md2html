@@ -7,6 +7,8 @@
 --index-url https://gitea.woggioni.net/api/packages/woggioni/pypi/simple
 --extra-index-url https://pypi.org/simple
 
+aiofiles==24.1.0
+    # via bugis (pyproject.toml)
 click==8.1.7
     # via granian
 granian==1.6.1
