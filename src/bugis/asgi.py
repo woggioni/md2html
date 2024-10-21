@@ -13,7 +13,8 @@ with open(logging_configuration_file, 'r') as input_file:
     configure_logging(conf)
 
 
-log = logging.getLogger(__name__)
+log = logging.getLogger('access')
+log.propagate = False
 
 _server = None
 async def application(ctx, receive, send):

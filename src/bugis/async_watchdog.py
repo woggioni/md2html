@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from watchdog.events import FileSystemEventHandler, FileSystemEvent, PatternMatchingEventHandler
 from watchdog.observers import Observer
@@ -8,6 +9,7 @@ from asyncio import Queue, AbstractEventLoop, Future, CancelledError, Task
 from typing import Optional, Callable
 from logging import getLogger
 
+log : logging.Logger = getLogger(__name__)
 
 class Subscription:
     _unsubscribe_callback: Callable[['Subscription'], None]
@@ -21,10 +23,12 @@ class Subscription:
 
     def unsubscribe(self) -> None:
         self._unsubscribe_callback(self)
+        log.debug('Deleted subscription %s', id(self))
 
     async def wait(self, tout: float) -> bool:
         handle = self._loop.call_later(tout, lambda: self._event.cancel())
         try:
+            log.debug('Subscription %s is waiting for an event', id(self))
             await self._event
             return True
         except CancelledError:
@@ -33,6 +37,7 @@ class Subscription:
             handle.cancel()
 
     def notify(self) -> None:
+        log.debug('Subscription %s notified', id(self))
         self._event.set_result(None)
 
     def reset(self) -> None:
@@ -85,7 +90,6 @@ def watch(path: Path, queue: Queue, loop: AbstractEventLoop,
     observer.join()
     loop.call_soon_threadsafe(queue.put_nowait, None)
 
-
 class SubscriptionManager:
     _loop: AbstractEventLoop
     _queue: Queue
@@ -104,6 +108,7 @@ class SubscriptionManager:
             subscriptions_per_path.remove(subscription)
 
         result = Subscription(unsubscribe_callback, self._loop)
+        log.debug('Created subscription %s to path %s', id(result), path)
         subscriptions_per_path.add(result)
         return result
 

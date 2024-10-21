@@ -58,3 +58,4 @@ exclude = ["scripts", "docs", "test"]
 strict = true
 
 [tool.setuptools_scm]
+version_file = "src/bugis/_version.py"

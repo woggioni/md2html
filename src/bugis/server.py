@@ -70,12 +70,12 @@ class Server:
         url_path: 'StrOrBytesPath' = normpath(join('/', relative_path))
         path: 'StrOrBytesPath' = join(self.root_dir, relative_path)
         if url_path in STATIC_RESOURCES:
-            content, mtime = load_from_cache(url_path)
+            content, mtime = await load_from_cache(url_path)
             content = content.encode()
             etag, digest = await self.compute_etag_and_digest(
                 etag,
                 url_path,
-                lambda: AiofilesContextManager(completed_future(AsyncBufferedReader(BytesIO(content), loop=get_running_loop()))),
+                lambda: AiofilesContextManager(completed_future(AsyncBufferedReader(BytesIO(content), loop=get_running_loop(), executor=None))),
                 lambda: completed_future(mtime)
             )
             if etag and etag == digest:
@@ -267,11 +267,11 @@ class Server:
                         raw: bool,
                         digest: str,
                         send) -> list[bytes]:
-        body = compile_html(url_path,
+        body = (await compile_html(url_path,
                             path,
                             self.prefix,
                             MARDOWN_EXTENSIONS,
-                            raw=raw).encode()
+                            raw=raw)).encode()
         await send({
             'type': 'http.response.start',
             'status': 200,

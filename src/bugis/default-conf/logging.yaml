@@ -4,8 +4,13 @@ handlers:
   console:
     class : logging.StreamHandler
     formatter: default
+    level   : DEBUG
+    stream  : ext://sys.stderr
+  access:
+    class : logging.StreamHandler
+    formatter: request
     level   : INFO
-    stream  : ext://sys.stdout
+    stream  : ext://sys.stderr
 formatters:
   brief:
     format: '%(message)s'
@@ -13,7 +18,14 @@ formatters:
     format: '{asctime} [{levelname}] ({processName:s}/{threadName:s}) - {name} - {message}'
     style: '{'
     datefmt: '%Y-%m-%d %H:%M:%S'
+  request:
+    format: '{asctime} {client[0]}:{client[1]} HTTP/{http_version} {method} {path}'
+    style: '{'
+    datefmt: '%Y-%m-%d %H:%M:%S'
 loggers:
   root:
     handlers: [console]
+    level: DEBUG
+  access:
+    handlers: [access]
     level: INFO
