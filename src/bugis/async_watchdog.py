@@ -1,15 +1,14 @@
 import asyncio
-import logging
 
 from watchdog.events import FileSystemEventHandler, FileSystemEvent, PatternMatchingEventHandler
 from watchdog.observers import Observer
 from watchdog.events import FileMovedEvent, FileClosedEvent, FileCreatedEvent, FileModifiedEvent
 from pathlib import Path
 from asyncio import Queue, AbstractEventLoop, Future, CancelledError, Task
-from typing import Optional, Callable
-from logging import getLogger
+from typing import Callable
+from logging import getLogger, Logger
 
-log : logging.Logger = getLogger(__name__)
+log: Logger = getLogger(__name__)
 
 class Subscription:
     _unsubscribe_callback: Callable[['Subscription'], None]
@@ -20,6 +19,7 @@ class Subscription:
         self._unsubscribe_callback = unsubscribe
         self._event: Future = loop.create_future()
         self._loop = loop
+
 
     def unsubscribe(self) -> None:
         self._unsubscribe_callback(self)
@@ -139,7 +139,6 @@ class FileWatcher(PatternMatchingEventHandler):
                          case_sensitive=True)
         self._observer: Observer = Observer()
         self._observer.schedule(self, path=path, recursive=True)
-        self.logger = getLogger(FileWatcher.__name__)
         self._loop = asyncio.get_running_loop()
         self._subscription_manager = SubscriptionManager(self._loop)
         self._loop.run_in_executor(None, self._observer.start)
@@ -164,14 +163,14 @@ class FileWatcher(PatternMatchingEventHandler):
             self._subscription_manager.post_event(path)
 
         if isinstance(event, FileClosedEvent):
-            self.logger.debug("Closed %s: %s", what, event.src_path)
+            log.debug("Closed %s: %s", what, event.src_path)
             # update_subscriptions()
         elif isinstance(event, FileMovedEvent):
-            self.logger.debug("Moved %s: %s to %s", what, event.src_path, event.dest_path)
+            log.debug("Moved %s: %s to %s", what, event.src_path, event.dest_path)
             post_event(event.dest_path)
         elif isinstance(event, FileCreatedEvent):
-            self.logger.debug("Created %s: %s", what, event.src_path)
+            log.debug("Created %s: %s", what, event.src_path)
             post_event(event.src_path)
         elif isinstance(event, FileModifiedEvent):
-            self.logger.debug("Modified %s: %s", what, event.src_path)
+            log.debug("Modified %s: %s", what, event.src_path)
             post_event(event.src_path)

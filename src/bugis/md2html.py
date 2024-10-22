@@ -3,7 +3,9 @@ from os.path import dirname, join, relpath
 from time import time
 from typing import Optional, TYPE_CHECKING
 from aiofiles import open as async_open
+from asyncio import AbstractEventLoop
 import markdown
+import logging
 
 if TYPE_CHECKING:
     from _typeshed import StrOrBytesPath
@@ -19,6 +21,8 @@ STATIC_CACHE: dict[str, tuple[str, float]] = {}
 
 MARDOWN_EXTENSIONS = ['extra', 'smarty', 'tables', 'codehilite']
 
+logger = logging.getLogger(__name__)
+
 
 async def load_from_cache(path) -> tuple[str, float]:
     global STATIC_CACHE
@@ -29,12 +33,21 @@ async def load_from_cache(path) -> tuple[str, float]:
 
 
 async def compile_html(url_path,
-                 mdfile: 'StrOrBytesPath',
-                 prefix: Optional['StrOrBytesPath'] = None,
-                 extensions: Optional[list[str]] = None,
-                 raw: bool = False) -> str:
+                       mdfile: 'StrOrBytesPath',
+                       loop: AbstractEventLoop,
+                       prefix: Optional['StrOrBytesPath'] = None,
+                       extensions: Optional[list[str]] = None,
+                       raw: bool = False) -> str:
     async with mdfile and async_open(mdfile, 'r') or sys.stdin as instream:
-        html = markdown.markdown(await instream.read(), extensions=extensions, output_format='html')
+        src = await instream.read()
+
+        def render(source) -> str:
+            logger.debug("Starting markdown rendering for file '%s'", mdfile)
+            result = markdown.markdown(source, extensions=extensions, output_format='html')
+            logger.debug("Markdown rendering for file '%s' completed", mdfile)
+            return result
+
+        html = await loop.run_in_executor(None, render, src)
     if raw:
         doc = html
     else:

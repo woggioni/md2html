@@ -10,7 +10,7 @@ from aiofiles.ospath import exists, isdir, isfile, getmtime
 from aiofiles import open as async_open
 from aiofiles.base import AiofilesContextManager
 from aiofiles.threadpool.binary import AsyncBufferedReader
-from asyncio import get_running_loop
+from asyncio import AbstractEventLoop
 
 from .md2html import compile_html, load_from_cache, STATIC_RESOURCES, MARDOWN_EXTENSIONS
 from shutil import which
@@ -45,15 +45,20 @@ def is_markdown(filepath):
 def is_dotfile(filepath):
     return has_extension(filepath, ".dot")
 
+logger = logging.getLogger(__name__)
 
 class Server:
+    _loop : AbstractEventLoop
 
-    def __init__(self, root_dir: 'StrOrBytesPath' = getcwd(), prefix: Optional['StrOrBytesPath'] = None):
+    def __init__(self,
+                 root_dir: 'StrOrBytesPath' = getcwd(),
+                 prefix: Optional['StrOrBytesPath'] = None,
+                 loop: AbstractEventLoop = None):
         self.root_dir = root_dir
         self.cache = dict['StrOrBytesPath', tuple[str, float]]()
         self.file_watcher = FileWatcher(cwd)
-        self.logger = logging.getLogger(Server.__name__)
         self.prefix = prefix and normpath(f'{prefix.decode()}')
+        self._loop = loop
 
     async def handle_request(self, method: str, url_path: str, etag: Optional[str], query_string: Optional[str], send):
         if method != 'GET':
@@ -75,7 +80,7 @@ class Server:
             etag, digest = await self.compute_etag_and_digest(
                 etag,
                 url_path,
-                lambda: AiofilesContextManager(completed_future(AsyncBufferedReader(BytesIO(content), loop=get_running_loop(), executor=None))),
+                lambda: AiofilesContextManager(completed_future(AsyncBufferedReader(BytesIO(content), loop=self._loop, executor=None))),
                 lambda: completed_future(mtime)
             )
             if etag and etag == digest:
@@ -87,10 +92,9 @@ class Server:
                     'type': 'http.response.start',
                     'status': 200,
                     'headers': [
-                        (b'content-type', f'{mime_type}; charset=UTF-8'.encode()),
-                        (b'etag', f'W/"{digest}"'.encode()),
-                        (b'content-type', f'{mime_type}; charset=UTF-8'.encode()),
-                        (b'Cache-Control', b'must-revalidate, max-age=86400'),
+                        ('content-type', f'{mime_type}; charset=UTF-8'),
+                        ('etag', f'W/"{digest}"'.encode()),
+                        ('Cache-Control', 'must-revalidate, max-age=86400'),
                     ]
                 })
                 await send({
@@ -106,7 +110,7 @@ class Server:
                     lambda: async_open(path, 'rb'),
                     lambda: getmtime(path)
                 )
-                self.logger.debug('%s %s', etag, digest)
+                logger.debug('Etag: %s, digest: %s', etag, digest)
                 if etag and etag == digest:
                     if is_markdown(path) and query_string == 'reload':
                         subscription = self.file_watcher.subscribe(path)
@@ -133,15 +137,20 @@ class Server:
                     raw = query_string == 'reload'
                     await self.render_markdown(url_path, path, raw, digest, send)
                 elif is_dotfile(path) and which("dot"):
-                    graph = pgv.AGraph(path)
-                    body = graph.draw(None, format="svg", prog="dot")
+                    def render_graphviz(filepath: StrOrBytesPath) -> bytes:
+                        logger.debug("Starting Graphviz rendering for file '%s'", filepath)
+                        graph = pgv.AGraph(filepath)
+                        result = graph.draw(None, format="svg", prog="dot")
+                        logger.debug("Completed Graphviz rendering for file '%s'", filepath)
+                        return result
+                    body = await self._loop.run_in_executor(None, render_graphviz, path)
                     await send({
                         'type': 'http.response.start',
                         'status': 200,
                         'headers': (
-                            (b'Content-Type', b'image/svg+xml; charset=UTF-8'),
-                            (b'Etag', f'W/"{digest}"'.encode()),
-                            (b'Cache-Control', b'no-cache'),
+                            ('Content-Type', 'image/svg+xml; charset=UTF-8'),
+                            ('Etag', f'W/"{digest}"'),
+                            ('Cache-Control', 'no-cache'),
                         )
                     })
                     await send({
@@ -162,9 +171,9 @@ class Server:
                         'type': 'http.response.start',
                         'status': 200,
                         'headers': (
-                            (b'Content-Type', guess_type(basename(path))[0].encode() or b'application/octet-stream'),
-                            (b'Etag', f'W/"{digest}"'),
-                            (b'Cache-Control', b'no-cache')
+                            ('Content-Type', guess_type(basename(path))[0] or 'application/octet-stream'),
+                            ('Etag', f'W/"{digest}"'),
+                            ('Cache-Control', 'no-cache')
                         )
                     })
 
@@ -186,7 +195,7 @@ class Server:
                     'type': 'http.response.start',
                     'status': 200,
                     'headers': (
-                        (b'Content-Type', b'text/html; charset=UTF-8'),
+                        ('Content-Type', 'text/html; charset=UTF-8'),
                     )
                 })
                 await send({
@@ -266,26 +275,30 @@ class Server:
                         path: str,
                         raw: bool,
                         digest: str,
-                        send) -> list[bytes]:
-        body = (await compile_html(url_path,
-                            path,
-                            self.prefix,
-                            MARDOWN_EXTENSIONS,
-                            raw=raw)).encode()
+                        send) -> None:
+
+        body = await compile_html(
+            url_path,
+            path,
+            self._loop,
+            self.prefix,
+            MARDOWN_EXTENSIONS,
+            raw=raw
+        )
         await send({
             'type': 'http.response.start',
             'status': 200,
             'headers': (
-                (b'Content-Type', b'text/html; charset=UTF-8'),
-                (b'Etag', f'W/{digest}'.encode()),
-                (b'Cache-Control', b'no-cache'),
+                ('Content-Type', 'text/html; charset=UTF-8'),
+                ('Etag', f'W/{digest}'),
+                ('Cache-Control', 'no-cache'),
             )
         })
         await send({
             'type': 'http.response.body',
-            'body': body
+            'body': body.encode()
         })
-        return
+
     @staticmethod
     async def not_modified(send, digest: str, cache_control=('Cache-Control', 'no-cache')) -> []:
         await send({

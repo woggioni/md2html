@@ -4,7 +4,7 @@ handlers:
   console:
     class : logging.StreamHandler
     formatter: default
-    level   : DEBUG
+    level   : INFO
     stream  : ext://sys.stderr
   access:
     class : logging.StreamHandler
@@ -19,7 +19,7 @@ formatters:
     style: '{'
     datefmt: '%Y-%m-%d %H:%M:%S'
   request:
-    format: '{asctime} {client[0]}:{client[1]} HTTP/{http_version} {method} {path}'
+    format: '{asctime} {client[0]}:{client[1]} HTTP/{http_version} {method} {path} - {status}'
     style: '{'
     datefmt: '%Y-%m-%d %H:%M:%S'
 loggers:
@@ -28,4 +28,8 @@ loggers:
     level: DEBUG
   access:
     handlers: [access]
+    level: INFO
+  watchdog.observers.inotify_buffer:
+    level: INFO
+  MARKDOWN:
     level: INFO
