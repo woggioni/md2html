@@ -4,33 +4,38 @@ from watchdog.events import FileSystemEventHandler, FileSystemEvent, PatternMatc
 from watchdog.observers import Observer
 from watchdog.events import FileMovedEvent, FileClosedEvent, FileCreatedEvent, FileModifiedEvent
 from pathlib import Path
-from asyncio import Queue, AbstractEventLoop, Future, CancelledError, Task
-from typing import Callable
+from asyncio import Queue, AbstractEventLoop, Future, CancelledError, Task, gather
+from typing import Callable, Optional
 from logging import getLogger, Logger
 
 log: Logger = getLogger(__name__)
 
 class Subscription:
     _unsubscribe_callback: Callable[['Subscription'], None]
-    _event: Future
+    _event: Optional[Future]
     _loop: AbstractEventLoop
 
     def __init__(self, unsubscribe: Callable[['Subscription'], None], loop: AbstractEventLoop):
         self._unsubscribe_callback = unsubscribe
-        self._event: Future = loop.create_future()
+        self._event: Optional[Future] = None
         self._loop = loop
 
 
     def unsubscribe(self) -> None:
+        self._event.cancel()
         self._unsubscribe_callback(self)
         log.debug('Deleted subscription %s', id(self))
 
     async def wait(self, tout: float) -> bool:
-        handle = self._loop.call_later(tout, lambda: self._event.cancel())
+        self._event = self._loop.create_future()
+
+        def callback():
+            if not self._event.done():
+                self._event.set_result(False)
+        handle = self._loop.call_later(tout, callback)
         try:
             log.debug('Subscription %s is waiting for an event', id(self))
-            await self._event
-            return True
+            return await self._event
         except CancelledError:
             return False
         finally:
@@ -38,7 +43,8 @@ class Subscription:
 
     def notify(self) -> None:
         log.debug('Subscription %s notified', id(self))
-        self._event.set_result(None)
+        if not self._event.done():
+            self._event.set_result(True)
 
     def reset(self) -> None:
         self._event = self._loop.create_future()
@@ -106,6 +112,7 @@ class SubscriptionManager:
 
         def unsubscribe_callback(subscription):
             subscriptions_per_path.remove(subscription)
+            log.debug('Removed subscription %s to path %s', id(result), path)
 
         result = Subscription(unsubscribe_callback, self._loop)
         log.debug('Created subscription %s to path %s', id(result), path)
@@ -116,21 +123,29 @@ class SubscriptionManager:
         subscriptions = self._subscriptions
         subscriptions_per_path = subscriptions.get(path, None)
         if subscriptions_per_path:
+            log.debug(f"Subscriptions on '{path}': {len(subscriptions_per_path)}")
             for s in subscriptions_per_path:
                 s.notify()
 
     async def process_events(self):
         async for evt in AsyncQueueIterator(self._queue):
+            log.debug(f"Processed event for path '{evt}'")
             self._notify_subscriptions(evt)
+        log.debug(f"Event processor has completed")
+
 
     def post_event(self, path):
-        self._loop.call_soon_threadsafe(self._queue.put_nowait, path)
+        def callback():
+            self._queue.put_nowait(path)
+            log.debug(f"Posted event for path '{path}', queue size: {self._queue.qsize()}")
+        self._loop.call_soon_threadsafe(callback)
 
 
 class FileWatcher(PatternMatchingEventHandler):
     _subscription_manager: SubscriptionManager
     _loop: AbstractEventLoop
     _subscription_manager_loop: Task
+    _running_tasks : Future
 
     def __init__(self, path):
         super().__init__(patterns=['*.md'],
@@ -141,8 +156,10 @@ class FileWatcher(PatternMatchingEventHandler):
         self._observer.schedule(self, path=path, recursive=True)
         self._loop = asyncio.get_running_loop()
         self._subscription_manager = SubscriptionManager(self._loop)
-        self._loop.run_in_executor(None, self._observer.start)
-        self._subscription_manager_loop = self._loop.create_task(self._subscription_manager.process_events())
+        self._running_tasks = gather(
+            self._loop.run_in_executor(None, self._observer.start),
+            self._loop.create_task(self._subscription_manager.process_events())
+        )
 
     async def stop(self) -> None:
         def _observer_stop():
@@ -150,8 +167,8 @@ class FileWatcher(PatternMatchingEventHandler):
             self._observer.join()
             self._subscription_manager.post_event(None)
 
-        self._loop.run_in_executor(None, _observer_stop)
-        await self._subscription_manager_loop
+        await self._loop.run_in_executor(None, _observer_stop)
+        await self._running_tasks
 
     def subscribe(self, path: str) -> Subscription:
         return self._subscription_manager.subscribe(path)

@@ -1,21 +1,21 @@
-function req(first) {
+
+function req(first, previousETag) {
+    const minInterval = 2000;
     const start = new Date().getTime();
     const xmlhttp = new XMLHttpRequest();
     xmlhttp.onload = function() {
-        if (xmlhttp.status == 200) {
+        const eTag = xmlhttp.getResponseHeader("Etag")
+        if (xmlhttp.status == 200 && eTag !== previousETag) {
             document.querySelector("article.markdown-body").innerHTML = xmlhttp.responseText;
-        } else if(xmlhttp.status == 304) {
-        } else {
-            console.log(xmlhttp.status, xmlhttp.statusText);
         }
-        const nextCall = Math.min(1000, Math.max(0, 1000 - (new Date().getTime() - start)));
-        setTimeout(req, nextCall, false);
+        const nextCall = Math.min(minInterval, Math.max(0, minInterval - (new Date().getTime() - start)));
+        setTimeout(req, nextCall, false, eTag);
     };
     xmlhttp.onerror = function() {
         console.log(xmlhttp.status, xmlhttp.statusText);
-        setTimeout(req, 1000, false);
+        setTimeout(req, minInterval, false, previousETag);
     };
     xmlhttp.open("GET", location.pathname + "?reload", true);
     xmlhttp.send();
 }
-req(true);
+req(true, null);

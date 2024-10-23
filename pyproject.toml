@@ -28,7 +28,8 @@ dependencies = [
     "pwo",
     "PyYAML",
     "pygraphviz",
-    "aiofiles"
+    "aiofiles",
+    "aiohttp[speedups]"
 ]
 
 [project.optional-dependencies]

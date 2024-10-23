@@ -1,24 +1,25 @@
-import logging
-from os import getcwd
-from mimetypes import init as mimeinit, guess_type
 import hashlib
-
-from os.path import join, normpath, splitext, relpath, basename
+import logging
+from asyncio import AbstractEventLoop
 from asyncio import Future
-from aiofiles.os import listdir
-from aiofiles.ospath import exists, isdir, isfile, getmtime
+from io import BytesIO
+from mimetypes import init as mimeinit, guess_type
+from os import getcwd
+from os.path import join, normpath, splitext, relpath, basename
+from typing import Callable, TYPE_CHECKING, Optional, Awaitable, AsyncGenerator, Any
+
+import pygraphviz as pgv
 from aiofiles import open as async_open
 from aiofiles.base import AiofilesContextManager
+from aiofiles.os import listdir
+from aiofiles.ospath import exists, isdir, isfile, getmtime
 from aiofiles.threadpool.binary import AsyncBufferedReader
-from asyncio import AbstractEventLoop
-
-from .md2html import compile_html, load_from_cache, STATIC_RESOURCES, MARDOWN_EXTENSIONS
-from shutil import which
-import pygraphviz as pgv
-from io import BytesIO
-from typing import Callable, TYPE_CHECKING, Optional, Awaitable, AsyncGenerator, Any
-from .async_watchdog import FileWatcher
 from pwo import Maybe
+
+from .asgi_utils import encode_headers
+from .async_watchdog import FileWatcher
+from .md2html import compile_html, load_from_cache, STATIC_RESOURCES, MARDOWN_EXTENSIONS
+from .plantuml import render_plant_uml
 
 if TYPE_CHECKING:
     from _typeshed import StrOrBytesPath
@@ -44,6 +45,9 @@ def is_markdown(filepath):
 
 def is_dotfile(filepath):
     return has_extension(filepath, ".dot")
+
+def is_plant_uml(filepath):
+    return has_extension(filepath, ".puml")
 
 logger = logging.getLogger(__name__)
 
@@ -91,11 +95,11 @@ class Server:
                 await send({
                     'type': 'http.response.start',
                     'status': 200,
-                    'headers': [
-                        ('content-type', f'{mime_type}; charset=UTF-8'),
-                        ('etag', f'W/"{digest}"'.encode()),
-                        ('Cache-Control', 'must-revalidate, max-age=86400'),
-                    ]
+                    'headers': encode_headers({
+                        'content-type': f'{mime_type}; charset=UTF-8',
+                        'etag': f'W/{digest}',
+                        'Cache-Control': 'must-revalidate, max-age=86400',
+                    })
                 })
                 await send({
                     'type': 'http.response.body',
@@ -124,7 +128,7 @@ class Server:
                                     lambda: getmtime(path)
                                 )
                                 if etag != digest:
-                                    if exists(path) and await isfile(path):
+                                    if await exists(path) and await isfile(path):
                                         await self.render_markdown(url_path, path, True, digest, send)
                                         return
                                     else:
@@ -136,7 +140,7 @@ class Server:
                 elif is_markdown(path):
                     raw = query_string == 'reload'
                     await self.render_markdown(url_path, path, raw, digest, send)
-                elif is_dotfile(path) and which("dot"):
+                elif is_dotfile(path):
                     def render_graphviz(filepath: StrOrBytesPath) -> bytes:
                         logger.debug("Starting Graphviz rendering for file '%s'", filepath)
                         graph = pgv.AGraph(filepath)
@@ -147,11 +151,28 @@ class Server:
                     await send({
                         'type': 'http.response.start',
                         'status': 200,
-                        'headers': (
-                            ('Content-Type', 'image/svg+xml; charset=UTF-8'),
-                            ('Etag', f'W/"{digest}"'),
-                            ('Cache-Control', 'no-cache'),
-                        )
+                        'headers': encode_headers({
+                            'Content-Type': 'image/svg+xml; charset=UTF-8',
+                            'Etag': f'W/{digest}',
+                            'Cache-Control': 'no-cache',
+                        })
+                    })
+                    await send({
+                        'type': 'http.response.body',
+                        'body': body
+                    })
+                elif is_plant_uml(path):
+                    logger.debug("Starting PlantUML rendering for file '%s'", path)
+                    body = await render_plant_uml(path)
+                    logger.debug("Completed PlantUML rendering for file '%s'", path)
+                    await send({
+                        'type': 'http.response.start',
+                        'status': 200,
+                        'headers': encode_headers({
+                            'Content-Type': 'image/svg+xml; charset=UTF-8',
+                            'Etag': f'W/{digest}',
+                            'Cache-Control': 'no-cache'
+                        })
                     })
                     await send({
                         'type': 'http.response.body',
@@ -170,11 +191,11 @@ class Server:
                     await send({
                         'type': 'http.response.start',
                         'status': 200,
-                        'headers': (
-                            ('Content-Type', guess_type(basename(path))[0] or 'application/octet-stream'),
-                            ('Etag', f'W/"{digest}"'),
-                            ('Cache-Control', 'no-cache')
-                        )
+                        'headers': encode_headers({
+                            'Content-Type': guess_type(basename(path))[0] or 'application/octet-stream',
+                            'Etag': f'W/{digest}',
+                            'Cache-Control': 'no-cache'
+                        })
                     })
 
                     async for chunk in read_file(path):
@@ -194,9 +215,9 @@ class Server:
                 await send({
                     'type': 'http.response.start',
                     'status': 200,
-                    'headers': (
-                        ('Content-Type', 'text/html; charset=UTF-8'),
-                    )
+                    'headers': encode_headers({
+                        'Content-Type': 'text/html; charset=UTF-8',
+                    })
                 })
                 await send({
                     'type': 'http.response.body',
@@ -288,11 +309,11 @@ class Server:
         await send({
             'type': 'http.response.start',
             'status': 200,
-            'headers': (
-                ('Content-Type', 'text/html; charset=UTF-8'),
-                ('Etag', f'W/{digest}'),
-                ('Cache-Control', 'no-cache'),
-            )
+            'headers': encode_headers({
+                'Content-Type': 'text/html; charset=UTF-8',
+                'Etag': f'W/{digest}',
+                'Cache-Control': 'no-cache',
+            })
         })
         await send({
             'type': 'http.response.body',
@@ -300,14 +321,14 @@ class Server:
         })
 
     @staticmethod
-    async def not_modified(send, digest: str, cache_control=('Cache-Control', 'no-cache')) -> []:
+    async def not_modified(send, digest: str, cache_control: str ='no-cache') -> []:
         await send({
             'type': 'http.response.start',
             'status': 304,
-            'headers': (
-                (b'Etag', f'W/{digest}'.encode()),
-                cache_control
-            )
+            'headers': encode_headers({
+                'Etag': f'W/{digest}',
+                'Cache-Control': cache_control
+            })
         })
         await send({
             'type': 'http.response.body',
@@ -350,3 +371,6 @@ class Server:
         async for entry in await ls(file_filter):
             result += '<li><a href="' + entry + '"/>' + entry + '</li>'
         return result
+
+    async def stop(self):
+        await self.file_watcher.stop()

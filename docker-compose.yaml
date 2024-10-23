@@ -1,0 +1,46 @@
+networks:
+  default:
+    external: false
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.128.0.0/16
+          ip_range: 172.128.0.0/16
+          gateway: 172.128.0.254
+
+services:
+  granian:
+    build:
+      context: .
+    user: $UID:$GID
+    restart: unless-stopped
+#    container_name: granian
+    environment:
+      PLANT_UML_SERVER_ADDRESS: http://plant_uml:8080
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    volumes:
+      - ${STATIC_ROOT}:/srv/http
+  plant_uml:
+    image: plantuml/plantuml-server:jetty
+#    container_name: plantUML
+    restart: unless-stopped
+    tmpfs: /tmp/jetty
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 1G
+  nginx:
+    image: gitea.woggioni.net/woggioni/nginx:v1.27.2
+#    container_name: nginx
+    restart: unless-stopped
+    depends_on: 
+      - granian
+    volumes:
+      - ./conf/nginx-bugis.conf:/etc/nginx/conf.d/bugis.conf:ro
+    ports:
+      - 127.0.0.1:80:8080
