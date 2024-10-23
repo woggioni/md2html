@@ -2,3 +2,6 @@
 __pycache__
 *.pyc
 src/bugis/_version.py
+*.egg-info
+/build
+/dist
