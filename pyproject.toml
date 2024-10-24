@@ -29,7 +29,7 @@ dependencies = [
     "PyYAML",
     "pygraphviz",
     "aiofiles",
-    "aiohttp[speedups]"
+    "httpx[http2]"
 ]
 
 [project.optional-dependencies]

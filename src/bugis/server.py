@@ -6,7 +6,7 @@ from io import BytesIO
 from mimetypes import init as mimeinit, guess_type
 from os import getcwd
 from os.path import join, normpath, splitext, relpath, basename
-from typing import Callable, TYPE_CHECKING, Optional, Awaitable, AsyncGenerator, Any
+from typing import Callable, TYPE_CHECKING, Optional, Awaitable, AsyncGenerator, Any, Mapping
 
 import pygraphviz as pgv
 from aiofiles import open as async_open
@@ -14,6 +14,7 @@ from aiofiles.base import AiofilesContextManager
 from aiofiles.os import listdir
 from aiofiles.ospath import exists, isdir, isfile, getmtime
 from aiofiles.threadpool.binary import AsyncBufferedReader
+from httpx import AsyncClient
 from pwo import Maybe
 
 from .asgi_utils import encode_headers
@@ -52,7 +53,10 @@ def is_plant_uml(filepath):
 logger = logging.getLogger(__name__)
 
 class Server:
-    _loop : AbstractEventLoop
+    root_dir: 'StrOrBytesPath'
+    prefix: Optional['StrOrBytesPath']
+    _loop: AbstractEventLoop
+    _client: AsyncClient
 
     def __init__(self,
                  root_dir: 'StrOrBytesPath' = getcwd(),
@@ -63,8 +67,15 @@ class Server:
         self.file_watcher = FileWatcher(cwd)
         self.prefix = prefix and normpath(f'{prefix.decode()}')
         self._loop = loop
+        self._client = AsyncClient()
 
-    async def handle_request(self, method: str, url_path: str, etag: Optional[str], query_string: Optional[str], send):
+    async def handle_request(self,
+            method: str,
+            url_path: str,
+            etag: Optional[str],
+            query_string: Optional[str],
+            send: Callable[[Mapping[str, Any]], Awaitable[None]]
+         ):
         if method != 'GET':
             await send({
                 'type': 'http.response.start',
@@ -88,7 +99,7 @@ class Server:
                 lambda: completed_future(mtime)
             )
             if etag and etag == digest:
-                await self.not_modified(send, digest, ('Cache-Control', 'must-revalidate, max-age=86400'))
+                await self.not_modified(send, digest, 'must-revalidate, max-age=86400')
                 return
             elif content:
                 mime_type = guess_type(basename(url_path))[0] or 'application/octet-stream'
@@ -163,7 +174,6 @@ class Server:
                     })
                 elif is_plant_uml(path):
                     logger.debug("Starting PlantUML rendering for file '%s'", path)
-                    body = await render_plant_uml(path)
                     logger.debug("Completed PlantUML rendering for file '%s'", path)
                     await send({
                         'type': 'http.response.start',
@@ -174,9 +184,15 @@ class Server:
                             'Cache-Control': 'no-cache'
                         })
                     })
+                    await render_plant_uml(self._client, path, lambda chunk: send({
+                        'type': 'http.response.body',
+                        'body': chunk,
+                        'more_body': True
+                    }))
                     await send({
                         'type': 'http.response.body',
-                        'body': body
+                        'body': '',
+                        'more_body': False
                     })
                 else:
                     async def read_file(file_path):
@@ -374,3 +390,4 @@ class Server:
 
     async def stop(self):
         await self.file_watcher.stop()
+        await self._client.aclose()

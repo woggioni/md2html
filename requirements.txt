@@ -6,55 +6,49 @@
 #
 --extra-index-url https://gitea.woggioni.net/api/packages/woggioni/pypi/simple
 
-aiodns==3.2.0
-    # via aiohttp
 aiofiles==24.1.0
     # via bugis (pyproject.toml)
-aiohappyeyeballs==2.4.3
-    # via aiohttp
-aiohttp==3.10.10
-    # via bugis (pyproject.toml)
-aiosignal==1.3.1
-    # via aiohttp
-async-timeout==4.0.3
-    # via aiohttp
-attrs==24.2.0
-    # via aiohttp
-brotli==1.1.0
-    # via aiohttp
-cffi==1.17.1
-    # via pycares
-frozenlist==1.4.1
+anyio==4.6.2.post1
+    # via httpx
+certifi==2024.8.30
     # via
-    #   aiohttp
-    #   aiosignal
+    #   httpcore
+    #   httpx
+exceptiongroup==1.2.2
+    # via anyio
+h11==0.14.0
+    # via httpcore
+h2==4.1.0
+    # via httpx
+hpack==4.0.0
+    # via h2
+httpcore==1.0.6
+    # via httpx
+httpx==0.27.2
+    # via bugis (pyproject.toml)
+hyperframe==6.0.1
+    # via h2
 idna==3.10
-    # via yarl
+    # via
+    #   anyio
+    #   httpx
 markdown==3.7
     # via bugis (pyproject.toml)
-multidict==6.1.0
-    # via
-    #   aiohttp
-    #   yarl
-propcache==0.2.0
-    # via yarl
 pwo==0.0.3
     # via bugis (pyproject.toml)
-pycares==4.4.0
-    # via aiodns
-pycparser==2.22
-    # via cffi
 pygments==2.18.0
     # via bugis (pyproject.toml)
 pygraphviz==1.14
     # via bugis (pyproject.toml)
 pyyaml==6.0.2
     # via bugis (pyproject.toml)
+sniffio==1.3.1
+    # via
+    #   anyio
+    #   httpx
 typing-extensions==4.7.1
     # via
-    #   multidict
+    #   anyio
     #   pwo
 watchdog==5.0.3
     # via bugis (pyproject.toml)
-yarl==1.16.0
-    # via aiohttp

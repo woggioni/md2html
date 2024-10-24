@@ -9,7 +9,7 @@ RUN adduser -D luser
 USER luser
 WORKDIR /home/luser
 COPY --chown=luser:users ./requirements-dev.txt ./requirements-dev.txt
-COPY --chown=luser:users ./requirements-dev.txt ./requirements-run.txt
+COPY --chown=luser:users ./requirements-run.txt ./requirements-run.txt
 WORKDIR /home/luser/
 RUN python -m venv .venv
 RUN --mount=type=cache,target=/home/luser/.cache/pip,uid=1000,gid=1000 .venv/bin/pip wheel -w /home/luser/wheel -r requirements-dev.txt pygraphviz

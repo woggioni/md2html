@@ -14,14 +14,14 @@ from pwo import Maybe
 from .server import Server
 from asyncio import get_running_loop
 from .asgi_utils import decode_headers
-from typing import Optional
+from typing import Optional, Awaitable, Callable, Any, Mapping
 
 log = logging.getLogger('access')
 log.propagate = False
 
 _server : Optional[Server] = None
 
-async def application(scope, receive, send):
+async def application(scope, receive, send : Callable[[Mapping[str, Any]], Awaitable[None]]):
     global _server
     if scope['type'] == 'lifespan':
         while True:
