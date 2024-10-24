@@ -12,7 +12,7 @@ COPY --chown=luser:users ./requirements-dev.txt ./requirements-dev.txt
 COPY --chown=luser:users ./requirements-run.txt ./requirements-run.txt
 WORKDIR /home/luser/
 RUN python -m venv .venv
-RUN --mount=type=cache,target=/home/luser/.cache/pip,uid=1000,gid=1000 .venv/bin/pip wheel -w /home/luser/wheel -r requirements-dev.txt pygraphviz
+RUN --mount=type=cache,target=/home/luser/.cache/pip,uid=1000,gid=1000 .venv/bin/pip wheel -w /home/luser/wheel pygraphviz
 RUN --mount=type=cache,target=/home/luser/.cache/pip,uid=1000,gid=1000 .venv/bin/pip install -r requirements-dev.txt /home/luser/wheel/*.whl
 COPY --chown=luser:users . /home/luser/bugis
 WORKDIR /home/luser/bugis
@@ -21,12 +21,12 @@ RUN --mount=type=cache,target=/home/luser/.cache/pip,uid=1000,gid=1000 /home/lus
 
 FROM base AS release
 RUN mkdir /srv/http
-RUN adduser -D -h /var/bugis -u 1000 bugis
+RUN adduser -D -h /var/lib/bugis -u 1000 bugis
 USER bugis
-WORKDIR /var/bugis
+WORKDIR /var/lib/bugis
 COPY --chown=bugis:users conf/pip.conf ./.pip/pip.conf
 RUN python -m venv .venv
-RUN --mount=type=cache,target=/var/bugis/.cache/pip,uid=1000,gid=1000 --mount=type=bind,ro,from=build,source=/home/luser/bugis/requirements-run.txt,target=/requirements-run.txt --mount=type=bind,ro,from=build,source=/home/luser/wheel,target=/wheel .venv/bin/pip install -r /requirements-run.txt /wheel/*.whl
+RUN --mount=type=cache,target=/var/bugis/.cache/pip,uid=1000,gid=1000 --mount=type=bind,ro,from=build,source=/home/luser/requirements-run.txt,target=/requirements-run.txt --mount=type=bind,ro,from=build,source=/home/luser/wheel,target=/wheel .venv/bin/pip install -r /requirements-run.txt /wheel/*.whl
 RUN --mount=type=cache,target=/var/bugis/.cache/pip,uid=1000,gid=1000 --mount=type=bind,ro,from=build,source=/home/luser/bugis/dist,target=/dist .venv/bin/pip install /dist/*.whl
 VOLUME /srv/http
 WORKDIR /srv/http
@@ -37,6 +37,6 @@ ENV GRANIAN_INTERFACE=asgi
 ENV GRANIAN_LOOP=asyncio
 ENV GRANIAN_LOG_ENABLED=false
 
-ENTRYPOINT ["/var/bugis/.venv/bin/python", "-m", "granian", "bugis.asgi:application"]
+ENTRYPOINT ["/var/lib/bugis/.venv/bin/python", "-m", "granian", "bugis.asgi:application"]
 EXPOSE 8000/tcp
 
