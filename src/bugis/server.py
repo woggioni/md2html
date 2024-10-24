@@ -30,10 +30,11 @@ mimeinit()
 cwd: 'StrOrBytesPath' = getcwd()
 
 
-def completed_future[T](result : T) -> Future[T]:
+def completed_future[T](result: T) -> Future[T]:
     future = Future()
     future.set_result(result)
     return future
+
 
 def has_extension(filepath, extension):
     _, ext = splitext(filepath)
@@ -47,10 +48,13 @@ def is_markdown(filepath):
 def is_dotfile(filepath):
     return has_extension(filepath, ".dot")
 
+
 def is_plant_uml(filepath):
     return has_extension(filepath, ".puml")
 
+
 logger = logging.getLogger(__name__)
+
 
 class Server:
     root_dir: 'StrOrBytesPath'
@@ -74,7 +78,8 @@ class Server:
             url_path: str,
             etag: Optional[str],
             query_string: Optional[str],
-            send: Callable[[Mapping[str, Any]], Awaitable[None]]
+            send: Callable[[Mapping[str, Any]], Awaitable[None]],
+            pathsend: bool = False
          ):
         if method != 'GET':
             await send({
@@ -95,7 +100,8 @@ class Server:
             etag, digest = await self.compute_etag_and_digest(
                 etag,
                 url_path,
-                lambda: AiofilesContextManager(completed_future(AsyncBufferedReader(BytesIO(content), loop=self._loop, executor=None))),
+                lambda: AiofilesContextManager(
+                    completed_future(AsyncBufferedReader(BytesIO(content), loop=self._loop, executor=None))),
                 lambda: completed_future(mtime)
             )
             if etag and etag == digest:
@@ -158,6 +164,7 @@ class Server:
                         result = graph.draw(None, format="svg", prog="dot")
                         logger.debug("Completed Graphviz rendering for file '%s'", filepath)
                         return result
+
                     body = await self._loop.run_in_executor(None, render_graphviz, path)
                     await send({
                         'type': 'http.response.start',
@@ -195,8 +202,7 @@ class Server:
                         'more_body': False
                     })
                 else:
-                    async def read_file(file_path):
-                        buffer_size = 0x10000
+                    async def read_file(file_path, buffer_size=0x10000):
                         async with async_open(file_path, 'rb') as f:
                             while True:
                                 result = await f.read(buffer_size)
@@ -213,18 +219,23 @@ class Server:
                             'Cache-Control': 'no-cache'
                         })
                     })
-
-                    async for chunk in read_file(path):
+                    if pathsend:
+                        await send({
+                            'type': 'http.response.pathsend',
+                            'path': path
+                        })
+                    else:
+                        async for chunk in read_file(path):
+                            await send({
+                                'type': 'http.response.body',
+                                'body': chunk,
+                                'more_body': True
+                            })
                         await send({
                             'type': 'http.response.body',
-                            'body': chunk,
-                            'more_body': True
+                            'body': b'',
+                            'more_body': False
                         })
-                    await send({
-                        'type': 'http.response.body',
-                        'body': b'',
-                        'more_body': False
-                    })
 
             elif await isdir(path):
                 body = (await self.directory_listing(url_path, path)).encode()
@@ -243,7 +254,7 @@ class Server:
             await self.not_found(send)
 
     @staticmethod
-    async def stream_hash(source: AsyncBufferedReader, bufsize=0x1000) -> bytes:
+    async def stream_hash(source: AsyncBufferedReader, bufsize=0x10000) -> bytes:
         if bufsize <= 0:
             raise ValueError("Buffer size must be greater than 0")
         md5 = hashlib.md5()
@@ -255,7 +266,7 @@ class Server:
         return md5.digest()
 
     @staticmethod
-    async def file_hash(filepath, bufsize=0x1000) -> bytes:
+    async def file_hash(filepath, bufsize=0x10000) -> bytes:
         if bufsize <= 0:
             raise ValueError("Buffer size must be greater than 0")
         md5 = hashlib.md5()
@@ -277,8 +288,8 @@ class Server:
 
         return (
             Maybe.of_nullable(etag)
-                .map(skip_weak_marker)
-                .or_else(None)
+            .map(skip_weak_marker)
+            .or_else(None)
         )
 
     async def compute_etag_and_digest(
@@ -308,11 +319,11 @@ class Server:
         return etag, digest
 
     async def render_markdown(self,
-                        url_path: 'StrOrBytesPath',
-                        path: str,
-                        raw: bool,
-                        digest: str,
-                        send) -> None:
+                              url_path: 'StrOrBytesPath',
+                              path: str,
+                              raw: bool,
+                              digest: str,
+                              send) -> None:
 
         body = await compile_html(
             url_path,
@@ -337,7 +348,7 @@ class Server:
         })
 
     @staticmethod
-    async def not_modified(send, digest: str, cache_control: str ='no-cache') -> []:
+    async def not_modified(send, digest: str, cache_control: str = 'no-cache') -> []:
         await send({
             'type': 'http.response.start',
             'status': 304,
@@ -378,12 +389,15 @@ class Server:
                 for entry in sorted(await listdir(path)):
                     if await filter(join(path, entry)):
                         yield entry
+
             return result()
 
         async for entry in await ls(isdir):
             result += '<li><a href="' + entry + '/' + '"/>' + entry + '/' + '</li>'
+
         async def file_filter(entry: str) -> bool:
             return await isfile(entry) and is_markdown(entry)
+
         async for entry in await ls(file_filter):
             result += '<li><a href="' + entry + '"/>' + entry + '</li>'
         return result

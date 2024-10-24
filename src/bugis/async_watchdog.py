@@ -1,53 +1,14 @@
 import asyncio
+from asyncio import Queue, AbstractEventLoop, Future, Task, gather
+from logging import getLogger, Logger
+from pathlib import Path
 
+from pwo import TopicManager, Subscriber
+from watchdog.events import FileMovedEvent, FileClosedEvent, FileCreatedEvent, FileModifiedEvent
 from watchdog.events import FileSystemEventHandler, FileSystemEvent, PatternMatchingEventHandler
 from watchdog.observers import Observer
-from watchdog.events import FileMovedEvent, FileClosedEvent, FileCreatedEvent, FileModifiedEvent
-from pathlib import Path
-from asyncio import Queue, AbstractEventLoop, Future, CancelledError, Task, gather
-from typing import Callable, Optional
-from logging import getLogger, Logger
 
 log: Logger = getLogger(__name__)
-
-class Subscription:
-    _unsubscribe_callback: Callable[['Subscription'], None]
-    _event: Optional[Future]
-    _loop: AbstractEventLoop
-
-    def __init__(self, unsubscribe: Callable[['Subscription'], None], loop: AbstractEventLoop):
-        self._unsubscribe_callback = unsubscribe
-        self._event: Optional[Future] = None
-        self._loop = loop
-
-
-    def unsubscribe(self) -> None:
-        self._event.cancel()
-        self._unsubscribe_callback(self)
-        log.debug('Deleted subscription %s', id(self))
-
-    async def wait(self, tout: float) -> bool:
-        self._event = self._loop.create_future()
-
-        def callback():
-            if not self._event.done():
-                self._event.set_result(False)
-        handle = self._loop.call_later(tout, callback)
-        try:
-            log.debug('Subscription %s is waiting for an event', id(self))
-            return await self._event
-        except CancelledError:
-            return False
-        finally:
-            handle.cancel()
-
-    def notify(self) -> None:
-        log.debug('Subscription %s notified', id(self))
-        if not self._event.done():
-            self._event.set_result(True)
-
-    def reset(self) -> None:
-        self._event = self._loop.create_future()
 
 
 class _EventHandler(FileSystemEventHandler):
@@ -67,22 +28,6 @@ class _EventHandler(FileSystemEventHandler):
         self._loop.call_soon_threadsafe(self._queue.put_nowait, event)
 
 
-class AsyncQueueIterator:
-    _queue: Queue
-
-    def __init__(self, queue: Queue):
-        self._queue = queue
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        item = await self._queue.get()
-        if item is None:
-            raise StopAsyncIteration
-        return item
-
-
 observer = Observer()
 
 
@@ -96,55 +41,11 @@ def watch(path: Path, queue: Queue, loop: AbstractEventLoop,
     observer.join()
     loop.call_soon_threadsafe(queue.put_nowait, None)
 
-class SubscriptionManager:
-    _loop: AbstractEventLoop
-    _queue: Queue
-    _subscriptions: dict[str, set[Subscription]]
-
-    def __init__(self, loop: AbstractEventLoop):
-        self._subscriptions: dict[str, set[Subscription]] = dict()
-        self._loop = loop
-        self._queue = Queue()
-
-    def subscribe(self, path: str) -> Subscription:
-        subscriptions = self._subscriptions
-        subscriptions_per_path = subscriptions.setdefault(path, set())
-
-        def unsubscribe_callback(subscription):
-            subscriptions_per_path.remove(subscription)
-            log.debug('Removed subscription %s to path %s', id(result), path)
-
-        result = Subscription(unsubscribe_callback, self._loop)
-        log.debug('Created subscription %s to path %s', id(result), path)
-        subscriptions_per_path.add(result)
-        return result
-
-    def _notify_subscriptions(self, path):
-        subscriptions = self._subscriptions
-        subscriptions_per_path = subscriptions.get(path, None)
-        if subscriptions_per_path:
-            log.debug(f"Subscriptions on '{path}': {len(subscriptions_per_path)}")
-            for s in subscriptions_per_path:
-                s.notify()
-
-    async def process_events(self):
-        async for evt in AsyncQueueIterator(self._queue):
-            log.debug(f"Processed event for path '{evt}'")
-            self._notify_subscriptions(evt)
-        log.debug(f"Event processor has completed")
-
-
-    def post_event(self, path):
-        def callback():
-            self._queue.put_nowait(path)
-            log.debug(f"Posted event for path '{path}', queue size: {self._queue.qsize()}")
-        self._loop.call_soon_threadsafe(callback)
-
 
 class FileWatcher(PatternMatchingEventHandler):
-    _subscription_manager: SubscriptionManager
+    _topic_manager: TopicManager
     _loop: AbstractEventLoop
-    _subscription_manager_loop: Task
+    _topic_manager_loop: Task
     _running_tasks : Future
 
     def __init__(self, path):
@@ -155,29 +56,29 @@ class FileWatcher(PatternMatchingEventHandler):
         self._observer: Observer = Observer()
         self._observer.schedule(self, path=path, recursive=True)
         self._loop = asyncio.get_running_loop()
-        self._subscription_manager = SubscriptionManager(self._loop)
+        self._topic_manager = TopicManager(self._loop)
         self._running_tasks = gather(
             self._loop.run_in_executor(None, self._observer.start),
-            self._loop.create_task(self._subscription_manager.process_events())
+            self._loop.create_task(self._topic_manager.process_events())
         )
 
     async def stop(self) -> None:
         def _observer_stop():
             self._observer.stop()
             self._observer.join()
-            self._subscription_manager.post_event(None)
+            self._topic_manager.post_event(None)
 
         await self._loop.run_in_executor(None, _observer_stop)
         await self._running_tasks
 
-    def subscribe(self, path: str) -> Subscription:
-        return self._subscription_manager.subscribe(path)
+    def subscribe(self, path: str) -> Subscriber:
+        return self._topic_manager.subscribe(path)
 
     def on_any_event(self, event: FileSystemEvent) -> None:
         what = "directory" if event.is_directory else "file"
 
         def post_event(path):
-            self._subscription_manager.post_event(path)
+            self._topic_manager.post_event(path)
 
         if isinstance(event, FileClosedEvent):
             log.debug("Closed %s: %s", what, event.src_path)

@@ -60,3 +60,6 @@ strict = true
 
 [tool.setuptools_scm]
 version_file = "src/bugis/_version.py"
+
+[project.scripts]
+bugis = "bugis.cli:main"

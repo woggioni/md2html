@@ -19,7 +19,7 @@ from typing import Optional, Awaitable, Callable, Any, Mapping
 log = logging.getLogger('access')
 log.propagate = False
 
-_server : Optional[Server] = None
+_server: Optional[Server] = None
 
 async def application(scope, receive, send : Callable[[Mapping[str, Any]], Awaitable[None]]):
     global _server
@@ -49,6 +49,9 @@ async def application(scope, receive, send : Callable[[Mapping[str, Any]], Await
                 .filter(lambda it: it.get('type') == 'http.response.start')
                 .if_present(maybe_log))
             return result
+        pathsend = (Maybe.of_nullable(scope.get('extensions'))
+                    .map(lambda it: it.get("http.response.pathsend"))
+                    .is_present)
         await _server.handle_request(
             scope['method'],
             scope['path'],
@@ -58,6 +61,7 @@ async def application(scope, receive, send : Callable[[Mapping[str, Any]], Await
                 .map(lambda it: it.decode())
                 .or_else(None),
             Maybe.of_nullable(scope.get('query_string', None)).map(lambda it: it.decode()).or_else(None),
-            wrapped_send
+            wrapped_send,
+            pathsend
         )
 
