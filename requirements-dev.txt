@@ -129,7 +129,7 @@ typing-extensions==4.7.1
     # via
     #   mypy
     #   pwo
-urllib3==2.2.3
+urllib3==2.5.0
     # via
     #   requests
     #   twine
