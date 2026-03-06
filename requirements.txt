@@ -7,7 +7,7 @@
 --index-url https://gitea.woggioni.net/api/packages/woggioni/pypi/simple
 --extra-index-url https://pypi.org/simple
 
-markdown==3.7
+markdown==3.8.1
     # via bugis (pyproject.toml)
 pwo==0.0.3
     # via bugis (pyproject.toml)

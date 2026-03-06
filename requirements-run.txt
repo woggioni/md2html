@@ -11,7 +11,7 @@ click==8.1.7
     # via granian
 granian==1.6.1
     # via bugis (pyproject.toml)
-markdown==3.7
+markdown==3.8.1
     # via bugis (pyproject.toml)
 pwo==0.0.3
     # via bugis (pyproject.toml)
